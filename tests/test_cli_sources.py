@@ -121,7 +121,7 @@ def test_test_all_mixed_results_exit_1_and_never_aborts(cli, respx_mock, tmp_hom
     respx_mock.get("https://nation.africa/kenya/rss.xml").respond(404)
     respx_mock.get("https://www.centralbank.go.ke/news/").respond(200, text="<html>changed</html>")
     respx_mock.get("https://techcabal.com/feed/").mock(side_effect=httpx.ConnectError("refused"))
-    respx_mock.get("https://kenyanwallstreet.com/feed/").respond(
+    respx_mock.get("https://www.kbc.co.ke/category/business/feed/").respond(
         200, content=b"<rss version='2.0'><channel/></rss>"
     )
     tmp_home.sources_path.write_text(
@@ -136,10 +136,7 @@ def test_test_all_mixed_results_exit_1_and_never_aborts(cli, respx_mock, tmp_hom
     assert "selector matched nothing" in out["cbk_news"]["error"]
     assert "engine sources test cbk_news" in out["cbk_news"]["hint"]
     assert out["techcabal"]["status"] == "fail"
-    assert (
-        out["kenyan_wall_street"]["status"] == "empty"
-        and out["kenyan_wall_street"]["item_count"] == 0
-    )
+    assert out["kbc_business"]["status"] == "empty" and out["kbc_business"]["item_count"] == 0
     assert out["broken"]["status"] == "fail" and "invalid source" in out["broken"]["error"]
     assert "calendar" not in out
     rows = jlist(cli)
@@ -149,7 +146,8 @@ def test_test_all_mixed_results_exit_1_and_never_aborts(cli, respx_mock, tmp_hom
 def test_test_all_exit_0_when_everything_is_ok(cli, respx_mock, tmp_home):
     mock_sources(respx_mock, tmp_home)
     r, out = jtest(cli, "--all")
-    assert r.exit_code == 0 and len(out) == len(load_sources(tmp_home).specs)
+    enabled = [n for n, s in load_sources(tmp_home).specs.items() if s.enabled]
+    assert r.exit_code == 0 and set(out) == set(enabled)
     assert {x["status"] for x in out.values()} == {"ok"}
 
 

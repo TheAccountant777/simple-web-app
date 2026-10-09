@@ -13,6 +13,7 @@ import functools
 import hashlib
 import socket
 import ssl
+import warnings
 from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -22,6 +23,7 @@ import httpx
 from cryptography import x509
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import serialization
+from cryptography.utils import CryptographyDeprecationWarning
 from cryptography.x509.oid import AuthorityInformationAccessOID
 
 MAX_CERT_BYTES = 256 * 1024
@@ -39,16 +41,16 @@ def is_incomplete_chain(exc: Exception) -> bool:
 
 @functools.cache
 def _trusted_roots() -> tuple[x509.Certificate, ...]:
-    return tuple(x509.load_pem_x509_certificates(Path(certifi.where()).read_bytes()))
+    # certifi still ships an old root with a non-positive serial; cryptography warns about it.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", CryptographyDeprecationWarning)
+        return tuple(x509.load_pem_x509_certificates(Path(certifi.where()).read_bytes()))
 
 
-def validate_intermediate(cert: x509.Certificate) -> None:
-    """Refuse anything but a current CA certificate directly issued by a trusted root.
+MAX_HOPS = 3
 
-    The issuer URL comes from a certificate read over an unverified connection, so whatever
-    it downloads is untrusted input. Without this check an attacker could hand us their own
-    CA and, once cached in the trust store, it would vouch for any site.
-    """
+
+def _check_ca(cert: x509.Certificate) -> None:
     try:
         bc = cert.extensions.get_extension_for_class(x509.BasicConstraints).value
     except x509.ExtensionNotFound:
@@ -60,15 +62,32 @@ def validate_intermediate(cert: x509.Certificate) -> None:
     now = datetime.now(UTC)
     if not (cert.not_valid_before_utc <= now <= cert.not_valid_after_utc):
         raise ValueError("downloaded certificate is not currently valid")
-    for root in _trusted_roots():
-        if root.subject != cert.issuer:
-            continue
-        try:
-            cert.verify_directly_issued_by(root)
-        except (ValueError, TypeError, InvalidSignature):
-            continue
-        return
-    raise ValueError("downloaded certificate is not issued by a trusted root")
+
+
+def _signed_by(cert: x509.Certificate, issuer: x509.Certificate) -> bool:
+    if cert.issuer != issuer.subject:
+        return False
+    try:
+        cert.verify_directly_issued_by(issuer)
+    except (ValueError, TypeError, InvalidSignature):
+        return False
+    return True
+
+
+def _issued_by_trusted_root(cert: x509.Certificate) -> bool:
+    return any(_signed_by(cert, root) for root in _trusted_roots())
+
+
+def validate_intermediate(cert: x509.Certificate) -> None:
+    """Refuse anything but a current CA certificate directly issued by a trusted root.
+
+    The issuer URL comes from a certificate read over an unverified connection, so whatever
+    it downloads is untrusted input. Without this check an attacker could hand us their own
+    CA and, once cached in the trust store, it would vouch for any site.
+    """
+    _check_ca(cert)
+    if not _issued_by_trusted_root(cert):
+        raise ValueError("downloaded certificate is not issued by a trusted root")
 
 
 def aia_issuer_urls(cert: x509.Certificate) -> list[str]:
@@ -140,13 +159,47 @@ class AiaFixer:
             context.load_verify_locations(cafile=str(pem))
         return context
 
-    def _store(self, data: bytes) -> None:
-        cert = _parse_cert(data)
-        validate_intermediate(cert)
+    def _store(self, cert: x509.Certificate) -> None:
         der = cert.public_bytes(serialization.Encoding.DER)
         self.certs_dir.mkdir(parents=True, exist_ok=True)
         path = self.certs_dir / f"{hashlib.sha256(der).hexdigest()}.pem"
         path.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
+
+    async def _chain_to_root(self, leaf: x509.Certificate) -> list[x509.Certificate]:
+        """Follow CA Issuers URLs from the leaf until a certificate issued by a trusted root.
+
+        Every link is checked: each downloaded certificate must be a current, non-self-signed
+        CA that actually signed the certificate below it, and the top one must be signed by a
+        certifi root. Nothing is cached unless the whole chain checks out.
+        """
+        chain: list[x509.Certificate] = []
+        current = leaf
+        for _ in range(MAX_HOPS):
+            urls = aia_issuer_urls(current)
+            if not urls:
+                raise ValueError(
+                    f"no CA Issuers URL on {current.subject.rfc4514_string()} to fetch from"
+                )
+            last: Exception | None = None
+            for issuer_url in urls:
+                try:
+                    issuer = _parse_cert(await _download(issuer_url))
+                    _check_ca(issuer)
+                    if not _signed_by(current, issuer):
+                        raise ValueError("downloaded certificate did not sign the one below it")
+                    break
+                except Exception as exc:
+                    last = exc
+            else:
+                raise ValueError(f"could not download the intermediate certificate ({last})")
+            chain.append(issuer)
+            if _issued_by_trusted_root(issuer):
+                return chain
+            current = issuer
+        raise ValueError(
+            f"chain does not reach a trusted root within {MAX_HOPS} hops "
+            f"(last issuer: {current.issuer.rfc4514_string()})"
+        )
 
     async def client_for(self, url: str) -> httpx.AsyncClient:
         """Fetch and cache the missing intermediate for `url`'s server; return a client."""
@@ -154,18 +207,8 @@ class AiaFixer:
         host = parts.hostname or ""
         port = parts.port or (80 if parts.scheme == "http" else 443)
         leaf = x509.load_der_x509_certificate(await asyncio.to_thread(_fetch_leaf_der, host, port))
-        urls = aia_issuer_urls(leaf)
-        if not urls:
-            raise ValueError("the server certificate has no CA Issuers URL to fetch from")
-        last: Exception | None = None
-        for issuer_url in urls:
-            try:
-                self._store(await _download(issuer_url))
-                break
-            except Exception as exc:
-                last = exc
-        else:
-            raise ValueError(f"could not download the intermediate certificate ({last})")
+        for cert in await self._chain_to_root(leaf):
+            self._store(cert)
         loaded = tuple(sorted(p.name for p in self.certs_dir.glob("*.pem")))
         if self._client is None or loaded != self._loaded:
             if self._client is not None:

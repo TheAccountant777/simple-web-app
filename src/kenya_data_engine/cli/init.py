@@ -233,6 +233,9 @@ def init(
     non_interactive: Annotated[
         bool, typer.Option("--non-interactive", help="Read keys from the environment; no prompts.")
     ] = False,
+    keys: Annotated[
+        bool, typer.Option("--keys", help="Ask for API keys even if they are already saved.")
+    ] = False,
 ) -> None:
     """Set up the engine home: config files and API keys.
 
@@ -243,6 +246,7 @@ def init(
       engine init
       engine init --force
       engine init --reset-config
+      engine init --keys            # change saved API keys
       DEEPSEEK_API_KEY=sk-... TAVILY_API_KEY=tvly-... engine init --non-interactive
     """
     state = get_state(ctx)
@@ -260,12 +264,16 @@ def init(
         console.print(f"{mark} {name}: {result}")
 
     base_url = load_config(state.home).llm.base_url
-    if not non_interactive:
-        console.print("\n[muted]Paste your keys; input is hidden.[/]")
     verify = not no_verify
-    updates = _gather_keys(state, non_interactive, verify, base_url)
-    write_env(state.home.env_path, updates)
-    console.print(f"[ok]✓[/] .env: saved ({len(updates)} updated, mode 600)")
+    saved_key = load_secrets(state.home).deepseek_api_key is not None
+    if saved_key and not keys and not non_interactive:
+        console.print("[ok]✓[/] keys: using saved keys ([accent]engine init --keys[/] to change)")
+    else:
+        if not non_interactive:
+            console.print("\n[muted]Paste your keys; input is hidden.[/]")
+        updates = _gather_keys(state, non_interactive, verify, base_url)
+        write_env(state.home.env_path, updates)
+        console.print(f"[ok]✓[/] .env: saved ({len(updates)} updated, mode 600)")
 
     if no_verify:
         console.print("\n[muted]Skipped verification.[/] Next: [accent]engine doctor[/]")

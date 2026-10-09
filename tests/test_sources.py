@@ -36,7 +36,15 @@ LISTINGS = {
 }
 
 
-def test_packaged_sources_are_all_valid_and_enabled(tmp_home):
+def test_disabled_packaged_sources_carry_an_audit_note(tmp_home):
+    src = load_sources(tmp_home)
+    disabled = {n: s for n, s in src.specs.items() if not s.enabled}
+    assert disabled, "expected some sources disabled after the live test"
+    assert all(s.notes and "needs audit" in s.notes for s in disabled.values())
+    assert {"nation", "cbk_news", "parliament", "google_trends"}.isdisjoint(disabled)
+
+
+def test_packaged_sources_are_all_valid(tmp_home):
     src = load_sources(tmp_home)
     assert src.invalid == {}
     rss = {n for n, s in src.specs.items() if s.type == "rss"}
@@ -47,7 +55,6 @@ def test_packaged_sources_are_all_valid_and_enabled(tmp_home):
         | NEW_FEEDS
     )
     assert listing == LISTINGS
-    assert all(s.enabled for s in src.specs.values())
     assert "the_star" not in src.specs and "cbk" not in src.specs
 
 

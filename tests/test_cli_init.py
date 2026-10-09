@@ -127,7 +127,7 @@ def test_init_interactive_required_key_reprompts_when_empty(cli, monkeypatch, tm
 def test_init_interactive_enter_keeps_existing(cli, monkeypatch, tmp_home):
     tmp_home.env_path.write_text("DEEPSEEK_API_KEY=keep\nTAVILY_API_KEY=t1\n")
     answers(monkeypatch, "", "t2", "", "")
-    assert init(cli, "--no-verify").exit_code == 0
+    assert init(cli, "--no-verify", "--keys").exit_code == 0
     text = tmp_home.env_path.read_text()
     assert "DEEPSEEK_API_KEY=keep" in text and "TAVILY_API_KEY=t2" in text
 
@@ -222,3 +222,16 @@ def test_reset_config_without_existing_file_makes_no_backup(cli, monkeypatch, tm
     monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-deep")
     r = init(cli, "--non-interactive", "--no-verify", "--reset-config")
     assert r.exit_code == 0 and list(tmp_home.root.glob("config.yaml.bak-*")) == []
+
+
+def test_init_skips_key_prompts_when_keys_saved(cli, monkeypatch, tmp_home):
+    tmp_home.env_path.write_text("DEEPSEEK_API_KEY=keep\n")
+
+    def no_prompt(*a, **k):
+        raise AssertionError("must not prompt for keys")
+
+    monkeypatch.setattr(init_mod, "_ask", no_prompt)
+    r = init(cli, "--no-verify", "--reset-config")
+    assert r.exit_code == 0, r.output
+    assert "using saved keys" in r.stdout
+    assert tmp_home.env_path.read_text() == "DEEPSEEK_API_KEY=keep\n"

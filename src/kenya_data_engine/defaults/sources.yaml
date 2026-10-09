@@ -62,22 +62,22 @@ the_eastafrican:
   type: rss
   url: https://www.theeastafrican.co.ke/tea/rss.xml
   kind: news
-  enabled: true
-  notes: "agent-sourced, unverified until `engine doctor` passes live"
+  enabled: false
+  notes: "disabled 2026-10-09 after live test: 403 (bot-blocked); needs audit"
 
 the_eastafrican_business:
   type: rss
   url: https://www.theeastafrican.co.ke/tea/business/rss.xml
   kind: news
-  enabled: true
-  notes: "agent-sourced, unverified until `engine doctor` passes live"
+  enabled: false
+  notes: "disabled 2026-10-09 after live test: 403 (bot-blocked); needs audit"
 
 kenyan_wall_street:
   type: rss
   url: https://kenyanwallstreet.com/feed/
   kind: news
-  enabled: true
-  notes: "agent-sourced, unverified until `engine doctor` passes live"
+  enabled: false
+  notes: "disabled 2026-10-09 after live test: 410 Gone (feed removed); needs audit"
 
 capital_fm_business:
   type: rss
@@ -111,22 +111,22 @@ techpoint_africa_kenya:
   type: rss
   url: https://techpoint.africa/tag/kenya/feed/
   kind: news
-  enabled: true
-  notes: "agent-sourced, unverified until `engine doctor` passes live"
+  enabled: false
+  notes: "disabled 2026-10-09 after live test: 403 (bot-blocked); needs audit"
 
 disrupt_africa:
   type: rss
   url: https://disrupt-africa.com/feed/
   kind: news
-  enabled: true
-  notes: "agent-sourced, unverified until `engine doctor` passes live"
+  enabled: false
+  notes: "disabled 2026-10-09 after live test: feed frozen at Jan 2024 (old.disruptafrica.com); needs audit"
 
 techweez:
   type: rss
   url: https://techweez.com/feed/
   kind: news
-  enabled: true
-  notes: "agent-sourced, unverified until `engine doctor` passes live"
+  enabled: false
+  notes: "disabled 2026-10-09 after live test: feed returned 0 items; needs audit"
 
 africa_the_big_deal:
   type: rss
@@ -139,8 +139,8 @@ launch_base_africa:
   type: rss
   url: https://launchbaseafrica.com/feed/
   kind: news
-  enabled: true
-  notes: "agent-sourced, unverified until `engine doctor` passes live"
+  enabled: false
+  notes: "disabled 2026-10-09 after live test: 429 rate-limited; needs audit"
 
 reddit_kenya:
   type: rss
@@ -176,23 +176,23 @@ citizen_digital_business:
   type: listing
   url: https://www.citizen.digital/business
   kind: news
-  enabled: true
+  enabled: false
   item: "div.story-item, div.news-card, div.content-box"
   title: "h2, h3, .story-title"
   link: "a"
   date: "span.timestamp, time"
-  notes: "agent-sourced, unverified until `engine doctor` passes live"
+  notes: "disabled 2026-10-09 after live test: selector matched nothing; needs audit"
 
 cbk_press_releases:
   type: listing
   url: https://www.centralbank.go.ke/press-release/
   kind: policy
-  enabled: true
+  enabled: false
   item: "table tbody tr, div.post-item"
   title: "td:nth-child(2) a, h3 a, h2 a"
   link: "td:nth-child(2) a, a"
   date: "td:nth-child(1), span.date, .entry-date"
-  notes: "agent-sourced, unverified until `engine doctor` passes live"
+  notes: "disabled 2026-10-09 after live test: 404; needs audit"
 
 cbk_news:
   type: listing
@@ -209,12 +209,12 @@ cbk_weekly_bulletin:
   type: listing
   url: https://www.centralbank.go.ke/reports/weekly-bulletin/
   kind: data_release
-  enabled: true
+  enabled: false
   item: "table tbody tr, div.report-item"
   title: "td a, h3 a"
   link: "td a, a"
   date: "td:first-child, span.date"
-  notes: "agent-sourced, unverified until `engine doctor` passes live"
+  notes: "disabled 2026-10-09 after live test: listing returns 2016 PDFs first (wrong page/order); needs audit"
 
 knbs_recent_releases:
   type: listing
@@ -231,56 +231,56 @@ epra_downloads_releases:
   type: listing
   url: https://www.epra.go.ke/downloads/
   kind: data_release
-  enabled: true
+  enabled: false
   item: "table tbody tr, div.wpdm-download-card, div.download-item"
   title: "td.package-title a, h3 a, .title a"
   link: "td.package-title a, a"
   date: "td.date, span.date"
-  notes: "agent-sourced, unverified until `engine doctor` passes live"
+  notes: "disabled 2026-10-09 after live test: 404; needs audit"
 
 cma_press_releases:
   type: listing
   url: https://www.cma.or.ke/press-releases/
   kind: policy
-  enabled: true
+  enabled: false
   item: "table tbody tr, article.post"
   title: "td a, h2.entry-title a"
   link: "td a, h2.entry-title a"
   date: "td.date, span.entry-date"
-  notes: "agent-sourced, unverified until `engine doctor` passes live"
+  notes: "disabled 2026-10-09 after live test: 404; needs audit"
 
 nse_announcements:
   type: listing
   url: https://www.nse.co.ke/regulatory-announcements/
   kind: policy
-  enabled: true
+  enabled: false
   item: "table tbody tr, div.announcement-row"
   title: "td:nth-child(2) a, .title a"
   link: "td:nth-child(2) a, a"
   date: "td:nth-child(1), .date"
-  notes: "agent-sourced, unverified until `engine doctor` passes live"
+  notes: "disabled 2026-10-09 after live test: 404; needs audit"
 
 national_treasury_releases:
   type: listing
   url: https://www.treasury.go.ke/press-release/
   kind: policy
-  enabled: true
+  enabled: false
   item: "article.post, div.news-item"
   title: "h2.entry-title a, h3 a"
   link: "h2.entry-title a, h3 a"
   date: "span.entry-date, time"
-  notes: "agent-sourced, unverified until `engine doctor` passes live"
+  notes: "disabled 2026-10-09 after live test: selector matched nothing; needs audit"
 
 kra_public_notices:
   type: listing
   url: https://www.kra.go.ke/news-center/public-notices
   kind: policy
-  enabled: true
+  enabled: false
   item: "div.media-item, div.news-card, tr"
   title: "h4.title a, h3 a, td a"
   link: "h4.title a, h3 a, a"
   date: "span.date, time, td.date"
-  notes: "agent-sourced, unverified until `engine doctor` passes live"
+  notes: "disabled 2026-10-09 after live test: selector matched nothing; needs audit"
 
 parliament_senate:
   type: listing
@@ -297,12 +297,12 @@ kenya_law_gazette:
   type: listing
   url: http://kenyalaw.org/kenyalaw/klr_app/gazette.php
   kind: policy
-  enabled: true
+  enabled: false
   item: "table#example tbody tr, table tbody tr"
   title: "td:nth-child(2) a"
   link: "td:nth-child(2) a"
   date: "td:nth-child(1)"
-  notes: "agent-sourced, unverified until `engine doctor` passes live"
+  notes: "disabled 2026-10-09 after live test: 404; needs audit"
 
 trends24_kenya:
   type: listing
@@ -313,4 +313,4 @@ trends24_kenya:
   title: "a"
   link: "a"
   date: null
-  notes: "agent-sourced, unverified until `engine doctor` passes live"
+  notes: "verified live 2026-10-09 (engine sources test)"

@@ -30,6 +30,9 @@ def no_wait(monkeypatch):
     monkeypatch.setattr("kenya_data_engine.http._WAIT", tenacity.wait_none())
 
 
+_REAL_TRUSTED_ROOTS = tls._trusted_roots
+
+
 def _name(cn: str) -> x509.Name:
     return x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, cn)])
 
@@ -300,3 +303,78 @@ async def test_fixer_refuses_to_cache_rogue_ca(tmp_path, chain, monkeypatch):
 def test_context_disables_partial_chains(tmp_path):
     ctx = AiaFixer(tmp_path / "certs").ssl_context()
     assert not ctx.verify_flags & ssl.VERIFY_X509_PARTIAL_CHAIN
+
+
+def _keys(n):
+    return [ec.generate_private_key(ec.SECP256R1()) for _ in range(n)]
+
+
+async def test_fixer_follows_two_hop_chain_to_trusted_root(tmp_path, monkeypatch):
+    rk, k1, k2, lk = _keys(4)
+    root = make_cert("Root2", "Root2", rk, rk, ca=True)
+    monkeypatch.setattr(tls, "_trusted_roots", lambda: (root,))
+    cross = make_cert("Cross", "Root2", k1, rk, ca=True)
+    issuing = make_cert("Issuing", "Cross", k2, k1, ca=True, aia="http://aia.example/cross.crt")
+    leaf = make_cert("site.ke", "Issuing", lk, k2, ca=False, aia="http://aia.example/issuing.crt")
+    served = {"http://aia.example/issuing.crt": issuing, "http://aia.example/cross.crt": cross}
+    monkeypatch.setattr(tls, "_fetch_leaf_der", lambda h, p: der(leaf))
+
+    async def fake_download(url):
+        return der(served[url])
+
+    monkeypatch.setattr(tls, "_download", fake_download)
+    fixer = AiaFixer(tmp_path / "certs")
+    await fixer.client_for("https://site.ke/")
+    stored = {
+        x509.load_pem_x509_certificate(f.read_bytes()) for f in (tmp_path / "certs").glob("*.pem")
+    }
+    assert stored == {issuing, cross}
+    await fixer.aclose()
+
+
+async def test_fixer_rejects_link_not_signed_by_downloaded_cert(tmp_path, monkeypatch):
+    rk, mk, ok, lk = _keys(4)
+    root = make_cert("R", "R", rk, rk, ca=True)
+    monkeypatch.setattr(tls, "_trusted_roots", lambda: (root,))
+    mid = make_cert("Mid", "R", mk, rk, ca=True)
+    # leaf names "Mid" as issuer but is signed by another key
+    leaf = make_cert("site.ke", "Mid", lk, ok, ca=False, aia="http://aia.example/mid.crt")
+    monkeypatch.setattr(tls, "_fetch_leaf_der", lambda h, p: der(leaf))
+
+    async def fake_download(url):
+        return der(mid)
+
+    monkeypatch.setattr(tls, "_download", fake_download)
+    fixer = AiaFixer(tmp_path / "certs")
+    with pytest.raises(ValueError, match="did not sign"):
+        await fixer.client_for("https://site.ke/")
+    assert not list((tmp_path / "certs").glob("*.pem"))
+    await fixer.aclose()
+
+
+async def test_fixer_gives_up_after_max_hops(tmp_path, monkeypatch):
+    keys = _keys(6)
+    monkeypatch.setattr(tls, "_trusted_roots", lambda: ())
+    certs = {}
+    # c4 <- c3 <- c2 <- c1 <- leaf, none reaching a trusted root
+    for i in range(4, 0, -1):
+        certs[i] = make_cert(f"C{i}", f"C{i + 1}", keys[i], keys[i + 1], ca=True,
+                             aia=f"http://aia.example/c{i + 1}.crt")  # fmt: skip
+    leaf = make_cert("site.ke", "C1", keys[0], keys[1], ca=False, aia="http://aia.example/c1.crt")
+    monkeypatch.setattr(tls, "_fetch_leaf_der", lambda h, p: der(leaf))
+
+    async def fake_download(url):
+        return der(certs[int(url.removeprefix("http://aia.example/c").removesuffix(".crt"))])
+
+    monkeypatch.setattr(tls, "_download", fake_download)
+    fixer = AiaFixer(tmp_path / "certs")
+    with pytest.raises(ValueError, match="within 3 hops"):
+        await fixer.client_for("https://site.ke/")
+    assert not list((tmp_path / "certs").glob("*.pem"))
+    await fixer.aclose()
+
+
+def test_trusted_roots_load_without_warnings(recwarn):
+    _REAL_TRUSTED_ROOTS.cache_clear()
+    _REAL_TRUSTED_ROOTS()
+    assert not [w for w in recwarn if "serial number" in str(w.message)]

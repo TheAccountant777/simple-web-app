@@ -181,7 +181,7 @@ def cli_no_keys(tmp_home, monkeypatch):
 
 def test_doctor_exit_code_1_on_fail(cli_no_keys, respx_mock):
     respx_mock.route().mock(side_effect=httpx.ConnectError("down"))
-    r = cli_no_keys.invoke(app, ["doctor"])
+    r = cli_no_keys.invoke(app, ["doctor"], env={"COLUMNS": "200"})
     assert r.exit_code == 1 and "Traceback" not in r.stdout
     assert "engine init" in r.stdout and "fail" in r.stdout
 
