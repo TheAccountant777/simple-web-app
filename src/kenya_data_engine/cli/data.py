@@ -94,11 +94,16 @@ def _print_outcome(out: FetchOutcome) -> None:
         console.print(
             Text(f"    checks: {out.report.status} ({out.report.checked} checked)", style=style)
         )
-        for f in out.report.failures:
-            console.print(Text(f"      ✗ {f}", style="fail"), soft_wrap=True)
         for w in out.report.warnings:
             console.print(Text(f"      ! {w}", style="warn"), soft_wrap=True)
-    if out.error:
+    for it in out.items:
+        if it.status == "quarantined":
+            console.print(Text(f"    quarantined {it.final_url or it.url}", style="fail"))
+            for f in it.report.failures if it.report else []:
+                console.print(Text(f"      ✗ {f}", style="fail"), soft_wrap=True)
+        elif it.status == "error":
+            console.print(Text(f"    error {it.url}: {it.error}", style="fail"), soft_wrap=True)
+    if out.error and not out.items:  # discovery failed before any item
         console.print(Text(f"    error: {out.error}", style="fail"), soft_wrap=True)
 
 

@@ -1,9 +1,10 @@
 """Shared per-run context handed to every stage and tool."""
 
+import asyncio
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Any, Literal
 
 import httpx
 from pydantic import BaseModel
@@ -39,6 +40,10 @@ class RunContext:
     tls: AiaFixer
     emit: Callable[[StageEvent], None] = field(default=_no_emit)
     resolver: Resolver | None = None  # DNS seam for URL-policy checks; tests inject a fake
+    # Politeness state for the data layer (R14), per run: request slots and parsed robots.txt
+    # per host. Created lazily by data.adapters.base; kept here so each event loop gets its own.
+    domain_slots: dict[str, asyncio.Semaphore] = field(default_factory=dict)
+    robots: dict[str, Any] = field(default_factory=dict)
 
 
 @asynccontextmanager

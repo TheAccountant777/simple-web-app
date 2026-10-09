@@ -16,11 +16,11 @@ class Figure(BaseModel):
     value: Decimal
     unit: str
     formula: str  # e.g. "(b - a)"
-    inputs: list[str]  # "<series>|<period>|<entity>|<metric>"
+    inputs: list[str]  # "<series>|<period>|<entity>|<metric>|v<vintage>"
 
 
 def ref(o: StoredObservation) -> str:
-    return f"{o.series}|{o.period.label}|{o.entity}|{o.metric}"
+    return f"{o.series}|{o.period.label}|{o.entity}|{o.metric}|v{o.vintage}"
 
 
 def _same_unit(*obs: StoredObservation) -> str:
@@ -63,6 +63,8 @@ class FigureBook:
 
     def change(self, a: StoredObservation, b: StoredObservation, label: str) -> Figure:
         unit = _same_unit(a, b)
+        if unit == "pct":
+            unit = "pp"  # R12: the difference of two percentages is in percentage points
         with localcontext() as ctx:
             ctx.prec = PRECISION
             value = b.value - a.value
@@ -137,7 +139,7 @@ class FigureBook:
             "| --- | --- | --- | --- | --- | --- |",
         ]
         for f in self.figures:
-            shown = _quantize(f.value, 1 if f.unit == "pct" else 2)
+            shown = _quantize(f.value, 1 if f.unit in ("pct", "pp") else 2)
             lines.append(
                 f"| {f.id} | {cell(f.label)} | {shown} | {cell(f.unit)} | {cell(f.formula)} "
                 f"| {cell('; '.join(f.inputs))} |"

@@ -4,6 +4,7 @@
 #   adapter:   worldbank | sdmx | listing
 #   title, publisher, tier (1-4), enabled, note
 #   spec:      SeriesSpec (metric, unit, period_type, min_value, max_value, max_step_pct, ...)
+#              units: KES, USD, pct (never "%"), index, or a compound such as KES/L
 #              omit for document-only entries (they only discover links)
 #   params:    adapter-specific
 #     worldbank: indicator
@@ -22,7 +23,7 @@ wb:FP.CPI.TOTL.ZG:
   title: Kenya inflation, consumer prices (annual %)
   publisher: World Bank
   tier: 1
-  spec: {metric: inflation, unit: "%", period_type: year}
+  spec: {metric: inflation, unit: pct, period_type: year}
   params: {indicator: FP.CPI.TOTL.ZG}
 
 wb:PA.NUS.FCRF:

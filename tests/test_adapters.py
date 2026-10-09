@@ -35,7 +35,7 @@ async def test_worldbank_fetch_series(ctx, respx_mock):
     assert out.report and out.report.status == "accepted"
     rows = SeriesStore(ctx.home.db_path).latest("wb:FP.CPI.TOTL.ZG")
     assert [r.period.label for r in rows] == ["2021", "2023"]
-    assert rows[1].value == Decimal("7.67") and rows[1].unit == "%"
+    assert rows[1].value == Decimal("7.67") and rows[1].unit == "pct"
     assert rows[1].provenance.locator == "api:/v2/country/KEN/indicator/FP.CPI.TOTL.ZG#2023"
     again = await fetch_series("wb:FP.CPI.TOTL.ZG", ctx)
     assert again.added == AddResult(new=0, unchanged=2, revised=0)
@@ -164,7 +164,7 @@ async def test_quarantine_adds_nothing_keeps_blob(ctx, respx_mock, tmp_home):
     _wb(respx_mock, [{"date": "2023", "value": 9999, "indicator": {"value": "I"}}])
     tmp_home.catalog_path.write_text(
         "wb:FP.CPI.TOTL.ZG:\n"
-        "  spec: {metric: inflation, unit: '%', period_type: year, max_value: 100}\n"
+        "  spec: {metric: inflation, unit: pct, period_type: year, max_value: 100}\n"
     )
     out = await fetch_series("wb:FP.CPI.TOTL.ZG", ctx)
     assert out.report and out.report.status == "quarantined"
@@ -303,3 +303,87 @@ async def test_provenance_url_is_final_url_and_time_is_fetch_time(ctx, respx_moc
     await fetch_series("wb:FP.CPI.TOTL.ZG", ctx)  # cache hit: same final URL, original time
     again = SeriesStore(ctx.home.db_path).latest("wb:FP.CPI.TOTL.ZG")[0].provenance
     assert again.url == first.url and again.retrieved_at == first.retrieved_at
+
+
+async def test_outcome_items_report_each_release(ctx, respx_mock):
+    _wb(respx_mock)
+    out = await fetch_series("wb:FP.CPI.TOTL.ZG", ctx)
+    (it,) = out.items
+    assert it.status == "added" and it.url == WB_URL + "?format=json&per_page=1000"
+    assert it.final_url == it.url and it.sha256 and len(it.sha256) == 64
+    assert it.report and it.report.status == "accepted" and it.error is None
+    again = await fetch_series("wb:FP.CPI.TOTL.ZG", ctx)
+    assert [i.status for i in again.items] == ["unchanged"]
+
+
+async def test_outcome_items_quarantined_and_error(ctx, respx_mock, tmp_home):
+    _wb(respx_mock, [{"date": "2023", "value": 9999, "indicator": {"value": "I"}}])
+    tmp_home.catalog_path.write_text(
+        "wb:FP.CPI.TOTL.ZG:\n"
+        "  spec: {metric: inflation, unit: pct, period_type: year, max_value: 5}\n"
+    )
+    (it,) = (await fetch_series("wb:FP.CPI.TOTL.ZG", ctx)).items
+    assert it.status == "quarantined" and it.report and "above maximum" in it.report.failures[0]
+    assert it.sha256 is not None  # the blob is kept
+
+
+async def test_outcome_item_error_has_no_sha_when_download_fails(ctx, respx_mock):
+    respx_mock.get("https://example.org/data/").respond(
+        200, text='<a href="/files/CPI-2026-02.xlsx">x</a>'
+    )
+    respx_mock.get("https://example.org/files/CPI-2026-02.xlsx").respond(404)
+    ctx.home.catalog_path.write_text(
+        "x.cpi:\n  adapter: listing\n  title: T\n  publisher: P\n  tier: 1\n"
+        "  spec: {metric: price, metrics: [super], unit: KES, period_type: month}\n"
+        "  params:\n    url: https://example.org/data/\n    link_pattern: '/files/.*\\.xlsx$'\n"
+        "    date_pattern: '(\\d{4}-\\d{2})'\n    columns: {Town: entity, Super: 'value:super'}\n"
+    )
+    (it,) = (await fetch_series("x.cpi", ctx)).items
+    assert it.status == "error" and it.sha256 is None and it.final_url is None
+    assert it.error and "404" in it.error
+
+
+async def test_robots_allowed_disallowed_and_missing(ctx, respx_mock):
+    from kenya_data_engine.data.adapters.base import robots_allowed
+
+    respx_mock.get("https://r.ke/robots.txt").respond(
+        200,
+        text="User-agent: *\nDisallow: /private/\n\nUser-agent: kenya-data-engine\n"
+        "Disallow: /bots-only/\n",
+    )
+    assert await robots_allowed("https://r.ke/public/a.pdf", ctx)
+    assert not await robots_allowed("https://r.ke/bots-only/a.pdf", ctx)
+    assert await robots_allowed("https://r.ke/private/a.pdf", ctx)  # our own group overrides *
+    assert respx_mock.calls.call_count == 1  # robots.txt fetched once per host
+    respx_mock.get("https://none.ke/robots.txt").respond(404)
+    assert await robots_allowed("https://none.ke/anything", ctx)
+    respx_mock.get("https://broken.ke/robots.txt").respond(500)
+    assert await robots_allowed("https://broken.ke/anything", ctx)
+
+
+async def test_robots_star_group_disallows(ctx, respx_mock):
+    from kenya_data_engine.data.adapters.base import robots_allowed
+
+    respx_mock.get("https://s.ke/robots.txt").respond(200, text="User-agent: *\nDisallow: /\n")
+    assert not await robots_allowed("https://s.ke/x", ctx)
+
+
+async def test_policy_fetch_limits_requests_per_domain(ctx, respx_mock):
+    import asyncio
+
+    from kenya_data_engine.data.adapters.base import policy_fetch
+
+    live = peak = 0
+
+    async def slow(request):
+        nonlocal live, peak
+        live += 1
+        peak = max(peak, live)
+        await asyncio.sleep(0.02)
+        live -= 1
+        return httpx.Response(200, text="x")
+
+    respx_mock.get(host="slow.ke").mock(side_effect=slow)
+    ctx.config.data.per_domain_concurrency = 2
+    await asyncio.gather(*(policy_fetch(f"https://slow.ke/{n}", ctx, "page") for n in range(6)))
+    assert peak == 2

@@ -8,14 +8,19 @@ from pydantic import Field, ValidationError
 
 from kenya_data_engine.config import _load_yaml, _Strict
 from kenya_data_engine.context import RunContext
-from kenya_data_engine.data.adapters.base import Discovered, FetchOutcome, policy_fetch
+from kenya_data_engine.data.adapters.base import (
+    Discovered,
+    FetchOutcome,
+    ItemOutcome,
+    policy_fetch,
+)
 from kenya_data_engine.data.checks import check_observations
 from kenya_data_engine.data.models import CheckReport, Observation, SeriesSpec
 from kenya_data_engine.data.store import AddResult, BlobStore, SeriesStore
 from kenya_data_engine.errors import ConfigError, EngineError
 from kenya_data_engine.home import EngineHome
 
-__all__ = ["CatalogEntry", "FetchOutcome", "fetch_series", "load_catalog"]
+__all__ = ["CatalogEntry", "FetchOutcome", "ItemOutcome", "fetch_series", "load_catalog"]
 
 
 class CatalogEntry(_Strict):
@@ -143,11 +148,17 @@ async def fetch_series(key: str, ctx: RunContext, *, limit: int = 12) -> FetchOu
     blobs, store = BlobStore(ctx.home.blobs_dir), SeriesStore(ctx.home.db_path)
     errors: list[str] = []
     reports: list[tuple[str, CheckReport]] = []
+    items: list[ItemOutcome] = []
     fetched = 0
     totals = AddResult(0, 0, 0)
+    redact = ctx.tracer.redact
     for item in reversed(found[:limit]):
+        final: str | None = None
+        sha: str | None = None
+        report: CheckReport | None = None
         try:
             res = await policy_fetch(item.url, ctx, "item", getattr(adapter, "headers", None))
+            final = redact(res.url)
             sha = blobs.put(res.content)
             fetched += 1
             item = item.model_copy(update={"final_url": res.url, "retrieved_at": res.fetched_at})
@@ -156,11 +167,28 @@ async def fetch_series(key: str, ctx: RunContext, *, limit: int = 12) -> FetchOu
                 raise EngineError("no observations extracted")
             report = check_observations(obs, entry.spec, store.latest(key), rejects)
             reports.append((item.url, report))
+            status: Literal["added", "unchanged", "quarantined"] = "quarantined"
             if report.status == "accepted":
                 added = store.add(obs)
                 totals = AddResult(*(a + b for a, b in zip(totals, added, strict=True)))
+                status = "added" if added.new or added.revised else "unchanged"
+            items.append(
+                ItemOutcome(
+                    url=redact(item.url), final_url=final, sha256=sha, status=status, report=report
+                )
+            )
         except Exception as exc:
-            errors.append(ctx.tracer.redact(f"{item.url}: {exc}"))
+            errors.append(redact(f"{item.url}: {exc}"))
+            items.append(
+                ItemOutcome(
+                    url=redact(item.url),
+                    final_url=final,
+                    sha256=sha,
+                    status="error",
+                    report=report,
+                    error=redact(str(exc) or type(exc).__name__),
+                )
+            )
     return FetchOutcome(
         key=key,
         discovered=len(found),
@@ -168,4 +196,5 @@ async def fetch_series(key: str, ctx: RunContext, *, limit: int = 12) -> FetchOu
         added=totals,
         report=_merge_reports(reports),
         error="; ".join(errors) or None,
+        items=items,
     )

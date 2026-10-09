@@ -64,7 +64,7 @@ def test_data_fetch_error_and_disabled_exit_codes(cli, respx_mock):
 def test_data_fetch_quarantine_exits_1(cli, respx_mock, tmp_home):
     tmp_home.catalog_path.write_text(
         "wb:FP.CPI.TOTL.ZG:\n"
-        "  spec: {metric: inflation, unit: '%', period_type: year, max_value: 1}\n"
+        "  spec: {metric: inflation, unit: pct, period_type: year, max_value: 1}\n"
     )
     respx_mock.get(WB).respond(json=[{"page": 1}, ROWS])
     r = run(cli, "data", "fetch", "wb:FP.CPI.TOTL.ZG")
@@ -77,7 +77,7 @@ def test_data_show_csv(cli, respx_mock):
     r = run(cli, "data", "show", "wb:FP.CPI.TOTL.ZG", "--csv")
     lines = r.output.strip().splitlines()
     assert lines[0] == "period,entity,metric,value,unit,revised,source"
-    assert lines[2] == "2023,Kenya,inflation,7.67,%,,api.worldbank.org"
+    assert lines[2] == "2023,Kenya,inflation,7.67,pct,,api.worldbank.org"
 
 
 def test_catalog_probe_reports_and_saves_samples(cli, respx_mock, tmp_home, tmp_path):
@@ -165,7 +165,7 @@ def test_show_survives_markup_in_scraped_strings(cli, tmp_home):
                 entity="[/x]",
                 metric="inflation",
                 value=1,
-                unit="%",
+                unit="pct",
                 provenance=Provenance(
                     url="https://e.org/x",
                     blob_sha256="a",
@@ -178,3 +178,16 @@ def test_show_survives_markup_in_scraped_strings(cli, tmp_home):
     )
     r = run(cli, "data", "show", "wb:FP.CPI.TOTL.ZG")
     assert r.exit_code == 0 and "[/x]" in r.output
+
+
+def test_data_fetch_shows_quarantined_items_with_reasons(cli, respx_mock, tmp_home):
+    respx_mock.get(WB).respond(json=[{"page": 1}, [{"date": "2023", "value": 50, "indicator": {}}]])
+    tmp_home.catalog_path.write_text(
+        "wb:FP.CPI.TOTL.ZG:\n"
+        "  spec: {metric: inflation, unit: pct, period_type: year, max_value: 1}\n"
+    )
+    r = run(cli, "data", "fetch", "wb:FP.CPI.TOTL.ZG")
+    assert r.exit_code == 1
+    assert "quarantined" in r.output and "above maximum 1" in r.output
+    items = json.loads(run(cli, "data", "fetch", "wb:FP.CPI.TOTL.ZG", "--json").output)["items"]
+    assert items[0]["status"] == "quarantined" and items[0]["sha256"]

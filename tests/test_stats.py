@@ -42,7 +42,7 @@ def test_change_exact_with_log() -> None:
     f = book.change(_s("180.66", month(2026, 8)), _s("184.16"), "Super change")
     assert f.value == Decimal("3.50")
     assert f.id == "F1" and f.unit == "KES/L" and f.formula == "(b - a)"
-    assert f.inputs == ["pump|2026-08|Nairobi|super", "pump|2026-09|Nairobi|super"]
+    assert f.inputs == ["pump|2026-08|Nairobi|super|v1", "pump|2026-09|Nairobi|super|v1"]
     assert book.figures == [f]
 
 
@@ -105,3 +105,20 @@ def test_to_markdown() -> None:
     assert "F1" in md and "(b - a)" in md and "F2" in md
     assert "| 3.50 |" in md and "| 33.3 |" in md
     assert "Super \\| change" in md
+
+
+def test_change_on_pct_series_is_percentage_points() -> None:
+    f = FigureBook().change(_s("5.0", month(2026, 8), unit="pct"), _s("6.5", unit="pct"), "d")
+    assert f.value == Decimal("1.5") and f.unit == "pp"
+
+
+def test_pct_change_on_pct_series_stays_pct() -> None:
+    f = FigureBook().pct_change(_s("5", month(2026, 8), unit="pct"), _s("6", unit="pct"), "d")
+    assert f.value == Decimal("20") and f.unit == "pct"
+
+
+def test_inputs_carry_the_vintage() -> None:
+    a = _s("1")
+    b = a.model_copy(update={"vintage": 3, "revised": True})
+    f = FigureBook().mean([a, b], "m")
+    assert [i.rsplit("|", 1)[1] for i in f.inputs] == ["v1", "v3"]
