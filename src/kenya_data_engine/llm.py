@@ -153,9 +153,15 @@ async def run_agent[T](
                 "output": output.model_dump(mode="json")
                 if isinstance(output, BaseModel)
                 else output,
-                "usage": {"input_tokens": usage.input_tokens, "output_tokens": usage.output_tokens},
+                "usage": {
+                    "input_tokens": usage.input_tokens,
+                    "output_tokens": usage.output_tokens,
+                    "cache_read_tokens": usage.cache_read_tokens,
+                },
                 "latency_ms": latency,
-                "cost_usd": ctx.tracer.cost_of(usage.input_tokens, usage.output_tokens),
+                "cost_usd": ctx.tracer.cost_of(
+                    usage.input_tokens, usage.output_tokens, usage.cache_read_tokens
+                ),
                 "status": status,
                 "error": ctx.tracer.redact(error) if error else None,
             }
@@ -171,6 +177,7 @@ async def run_agent[T](
             status="ok" if status == "ok" else "error",
             error=error,
             attrs=attrs,
+            cache_read_tokens=usage.cache_read_tokens,
         )
 
     try:

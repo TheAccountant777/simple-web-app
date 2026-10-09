@@ -14,6 +14,7 @@ llm:
   pricing:
     input_per_m: 0.15
     output_per_m: 0.60
+    cache_hit_input_per_m: 0.015
   stages:
     # deepseek-flash thinks by default, and thinking mode rejects the forced
     # tool_choice used for structured output, so structured stages disable it.
@@ -43,3 +44,22 @@ radar:
 
 trace:
   capture_llm: true  # write each LLM call to <run>/llm/*.json (redacted)
+
+research:
+  default_budget: standard
+  presets:
+    lean: {usd: 0.05, search_credits: 10, seconds: 120}
+    standard: {usd: 0.15, search_credits: 25, seconds: 300}
+    deep: {usd: 0.50, search_credits: 60, seconds: 900}
+  shares: {planner: 0.15, scouts: 0.55, claims: 0.25, challenge: 0.05}
+  search_shares: {planner: 0.25, scouts: 0.65, claims: 0.0, challenge: 0.10}
+  protected: [claims, challenge]
+  scout_concurrency: 3
+  monthly_search_credits: 1000
+
+data:
+  max_bytes: {html: 5000000, pdf: 25000000, sheet: 10000000}
+  max_redirects: 5
+  pdf_max_pages: 60
+  parse_timeout_s: 30
+  per_domain_concurrency: 2

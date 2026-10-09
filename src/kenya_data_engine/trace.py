@@ -71,11 +71,13 @@ class Tracer:
         output_per_m: float,
         run_budget_usd: float,
         secrets: Sequence[str] = (),
+        cache_hit_per_m: float | None = None,
     ) -> None:
         self.path = path
         self.run_id = run_id
         self.input_per_m = input_per_m
         self.output_per_m = output_per_m
+        self.cache_hit_per_m = cache_hit_per_m
         self.run_budget_usd = run_budget_usd
         # Longest first so a secret that contains another is fully masked.
         self._secrets = sorted((x for x in secrets if x), key=len, reverse=True)
@@ -117,8 +119,15 @@ class Tracer:
 
         return unsubscribe
 
-    def cost_of(self, input_tokens: int, output_tokens: int) -> float:
-        return (input_tokens * self.input_per_m + output_tokens * self.output_per_m) / 1_000_000
+    def cost_of(self, input_tokens: int, output_tokens: int, cache_read_tokens: int = 0) -> float:
+        """Dollar cost; cache-read tokens (a subset of the input) get the cache-hit price."""
+        hit_price = self.input_per_m if self.cache_hit_per_m is None else self.cache_hit_per_m
+        cached = min(max(cache_read_tokens, 0), input_tokens)
+        return (
+            (input_tokens - cached) * self.input_per_m
+            + cached * hit_price
+            + output_tokens * self.output_per_m
+        ) / 1_000_000
 
     @property
     def remaining_usd(self) -> float:
@@ -155,8 +164,9 @@ class Tracer:
         status: Literal["ok", "error"] = "ok",
         error: str | None = None,
         attrs: dict[str, Any] | None = None,
+        cache_read_tokens: int = 0,
     ) -> float:
-        cost = self.cost_of(input_tokens, output_tokens)
+        cost = self.cost_of(input_tokens, output_tokens, cache_read_tokens)
         self.record(
             TraceEvent(
                 ts=datetime.now(UTC),
@@ -171,7 +181,7 @@ class Tracer:
                 output_tokens=output_tokens,
                 cost_usd=cost,
                 error=error,
-                attrs=attrs or {},
+                attrs={**(attrs or {}), "cache_read": cache_read_tokens},
             )
         )
         return cost

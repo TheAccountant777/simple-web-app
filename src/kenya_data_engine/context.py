@@ -63,6 +63,7 @@ async def open_context(
             )
             if v is not None
         ],
+        cache_hit_per_m=config.llm.pricing.cache_hit_input_per_m,
     )
     fixer = AiaFixer(home.certs_dir)
     try:

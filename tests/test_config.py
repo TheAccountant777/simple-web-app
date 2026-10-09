@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from kenya_data_engine.config import load_config, load_secrets
+from kenya_data_engine.config import BudgetPreset, load_config, load_secrets
 from kenya_data_engine.errors import ConfigError, EngineError
 from kenya_data_engine.home import EngineHome
 
@@ -162,3 +162,28 @@ def test_unknown_nested_key_rejected(tmp_home):
     with pytest.raises(ConfigError) as e:
         load_config(tmp_home)
     assert "run_dollars" in (e.value.hint or "") or "run_dollars" in e.value.message
+
+
+def test_research_presets_defaults(tmp_home):
+    r = load_config(tmp_home).research
+    assert r.presets["standard"] == BudgetPreset(usd=0.15, search_credits=25, seconds=300)
+    assert r.presets["lean"] == BudgetPreset(usd=0.05, search_credits=10, seconds=120)
+    assert r.presets["deep"] == BudgetPreset(usd=0.50, search_credits=60, seconds=900)
+    assert sum(r.shares.values()) == pytest.approx(1.0)
+    assert sum(r.search_shares.values()) == pytest.approx(1.0)
+    assert r.protected == ["claims", "challenge"]
+    assert r.default_budget == "standard" and r.monthly_search_credits == 1000
+
+
+def test_research_shares_must_sum_to_one(tmp_home):
+    tmp_home.config_path.write_text(
+        "research:\n  shares: {planner: 0.15, scouts: 0.5, claims: 0.2, challenge: 0.05}\n"
+    )
+    with pytest.raises(ConfigError):
+        load_config(tmp_home)
+
+
+def test_data_defaults(tmp_home):
+    d = load_config(tmp_home).data
+    assert d.max_bytes == {"html": 5_000_000, "pdf": 25_000_000, "sheet": 10_000_000}
+    assert d.max_redirects == 5 and d.pdf_max_pages == 60 and d.parse_timeout_s == 30

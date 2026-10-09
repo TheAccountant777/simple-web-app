@@ -52,6 +52,7 @@ class _Strict(BaseModel):
 class Pricing(_Strict):
     input_per_m: float
     output_per_m: float
+    cache_hit_input_per_m: float | None = None
 
 
 class StageLLM(_Strict):
@@ -87,6 +88,37 @@ class SynthConfig(_Strict):
     max_signals: int = 300
 
 
+class BudgetPreset(_Strict):
+    usd: float
+    search_credits: int
+    seconds: float
+
+
+class ResearchConfig(_Strict):
+    default_budget: Literal["lean", "standard", "deep"] = "standard"
+    presets: dict[str, BudgetPreset]
+    shares: dict[str, float]
+    search_shares: dict[str, float]
+    protected: list[str]
+    scout_concurrency: int = 3
+    monthly_search_credits: int = 1000
+
+    @model_validator(mode="after")
+    def _shares_sum_to_one(self) -> "ResearchConfig":
+        for label, shares in (("shares", self.shares), ("search_shares", self.search_shares)):
+            if abs(sum(shares.values()) - 1.0) > 1e-6:
+                raise ValueError(f"research.{label} must sum to 1.0, got {sum(shares.values())}")
+        return self
+
+
+class DataConfig(_Strict):
+    max_bytes: dict[str, int]
+    max_redirects: int = 5
+    pdf_max_pages: int = 60
+    parse_timeout_s: float = 30
+    per_domain_concurrency: int = 2
+
+
 class TraceConfig(_Strict):
     capture_llm: bool = True
 
@@ -102,6 +134,8 @@ class EngineConfig(_Strict):
     cache_ttl_hours: float = 6.0
     synth: SynthConfig = Field(default_factory=SynthConfig)
     trace: TraceConfig = Field(default_factory=TraceConfig)
+    research: ResearchConfig
+    data: DataConfig
 
 
 def _deep_merge(base: dict[str, Any], over: dict[str, Any]) -> dict[str, Any]:

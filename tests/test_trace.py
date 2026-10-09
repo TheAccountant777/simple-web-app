@@ -132,3 +132,18 @@ def test_tracer_seeds_from_existing_trace(tmp_path):
 def test_tracer_ignores_garbage_trace_lines(tmp_path):
     (tmp_path / "t.jsonl").write_text('{"truncated\nnot json\n')
     assert make(tmp_path).total_cost == 0.0
+
+
+def test_cost_of_cache_reads(tmp_path):
+    t = Tracer(tmp_path / "t.jsonl", "r", 0.15, 0.60, 1.0, cache_hit_per_m=0.015)
+    assert t.cost_of(1_000_000, 0, cache_read_tokens=400_000) == pytest.approx(
+        0.6 * 0.15 + 0.4 * 0.015
+    )
+    plain = make(tmp_path)
+    assert plain.cost_of(1_000_000, 0, cache_read_tokens=400_000) == plain.cost_of(1_000_000, 0)
+
+
+def test_record_llm_stores_cache_reads(tmp_path):
+    t = Tracer(tmp_path / "t.jsonl", "r", 0.15, 0.60, 1.0, cache_hit_per_m=0.015)
+    t.record_llm("s", "n", 1000, 0, 1, cache_read_tokens=400)
+    assert lines(tmp_path)[0]["attrs"]["cache_read"] == 400
