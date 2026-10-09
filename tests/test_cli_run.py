@@ -221,3 +221,19 @@ def test_help_has_examples(cli):
         r = cli.invoke(app, args)
         assert r.exit_code == 0 and "engine " in r.stdout
     assert "--resume" in cli.invoke(app, ["run", "--help"]).stdout
+
+
+def test_stage_radar_on_run_removes_stale_topics(cli, fake_stages, tmp_home):
+    handle = RunStore(tmp_home.runs_dir).new_run(datetime(2026, 10, 9, 8, 0))
+    handle.write("topics", TopicList(topics=[make_topic(9, 1.0)]))
+    r = cli.invoke(app, ["stage", "radar", "--run", handle.run_id])
+    assert r.exit_code == 0, r.output
+    assert (handle.dir / "signals.json").exists() and not (handle.dir / "topics.json").exists()
+
+
+def test_stage_rejects_input_with_run(cli, fake_stages, tmp_home, tmp_path):
+    handle = RunStore(tmp_home.runs_dir).new_run(datetime(2026, 10, 9, 8, 0))
+    f = tmp_path / "in.json"
+    f.write_text(RADAR.model_dump_json())
+    r = cli.invoke(app, ["stage", "synthesize", "--input", str(f), "--run", handle.run_id])
+    assert r.exit_code == 2 and "--input" in r.stdout and "--run" in r.stdout

@@ -66,6 +66,21 @@ class Tracer:
         self._secrets = sorted((x for x in secrets if x), key=len, reverse=True)
         self.total_cost = 0.0
         self._events: list[TraceEvent] = []
+        self._seed_from_existing()
+
+    def _seed_from_existing(self) -> None:
+        """Pick up events of a resumed run so spend and summaries cover the whole run."""
+        try:
+            lines = self.path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            return
+        for line in lines:
+            try:
+                event = TraceEvent.model_validate_json(line)
+            except ValueError:
+                continue
+            self._events.append(event)
+            self.total_cost += event.cost_usd
 
     def redact(self, text: str) -> str:
         """Mask configured secret values in free text."""

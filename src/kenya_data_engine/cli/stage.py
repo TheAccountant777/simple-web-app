@@ -26,6 +26,9 @@ class StageName(StrEnum):
     synthesize = "synthesize"
 
 
+DOWNSTREAM: dict[StageName, tuple[str, ...]] = {StageName.radar: ("topics",)}
+
+
 class _Preloaded:
     """Feeds an already-collected RadarResult into the next stage."""
 
@@ -74,6 +77,11 @@ def stage(
       engine stage synthesize --input ./signals.json
     """
     state = get_state(ctx)
+    if input_path is not None and run_id is not None:
+        raise EngineError(
+            "--input and --run cannot be used together",
+            hint="use --run to continue an existing run, or --input for a standalone file",
+        )
     state.home.ensure()
     store = RunStore(state.home.runs_dir)
     stages: list[Stage[Any, Any]] = []
@@ -100,6 +108,9 @@ def stage(
         stages = [_Preloaded(data), SynthesizeStage()]
         artifact = "topics"
     handle = store.open(run_id) if run_id else store.new_run(datetime.now())
+    if run_id is not None:
+        for stale in DOWNSTREAM.get(name, ()):  # later stages' artifacts are now out of date
+            (handle.dir / f"{stale}.json").unlink(missing_ok=True)
     started = time.perf_counter()
 
     async def go() -> None:

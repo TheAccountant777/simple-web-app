@@ -122,3 +122,22 @@ async def test_open_context_wires_config_and_closes_client(tmp_home):
         http: httpx.AsyncClient = c.http
         assert not http.is_closed
     assert http.is_closed
+
+
+async def test_resume_reruns_all_stages_after_first_rerun(ctx, events):
+    (ctx.run.dir / "a.json").write_text("{bad")
+    ctx.run.write("b", BOut(total=999))  # stale downstream artifact
+    out = await run_pipeline([A(), B()], ctx, resume=True)
+    assert A.calls == 1 and B.calls == 1
+    assert out == BOut(total=20)
+    assert ("b", "skip") not in [(e.stage, e.status) for e in events]
+
+
+async def test_stage_error_detail_is_redacted(ctx, events):
+    class Leaky(B):
+        async def run(self, ctx, inp):
+            raise RuntimeError("failed with key fake-deepseek here")
+
+    with pytest.raises(RuntimeError):
+        await run_pipeline([A(), Leaky()], ctx)
+    assert "fake-deepseek" not in events[-1].detail and "***" in events[-1].detail

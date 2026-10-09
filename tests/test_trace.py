@@ -115,3 +115,20 @@ def test_secret_values_redacted_in_error_and_attrs(tmp_path):
     row = lines(tmp_path)[0]
     assert row["error"] == "401 for https://x?k=***"
     assert row["attrs"]["n"] == 1
+
+
+def test_tracer_seeds_from_existing_trace(tmp_path):
+    first = make(tmp_path, 1.0)
+    first.record_llm("synthesize_score", "t", 1_000_000, 500_000, 5)  # $0.45
+    resumed = make(tmp_path, 0.50)
+    assert resumed.total_cost == pytest.approx(0.45)
+    assert resumed.summary()["stages"]["synthesize_score"]["events"] == 1
+    resumed.record_llm("synthesize_score", "t", 400_000, 0, 5)  # $0.06
+    assert resumed.summary()["events"] == 2
+    with pytest.raises(BudgetExceeded):
+        resumed.check_budget()
+
+
+def test_tracer_ignores_garbage_trace_lines(tmp_path):
+    (tmp_path / "t.jsonl").write_text('{"truncated\nnot json\n')
+    assert make(tmp_path).total_cost == 0.0
