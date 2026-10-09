@@ -1,0 +1,36 @@
+# rule: monthly (day 1-28, or -1 for the last day) | annual (month, day) | date (ISO date)
+events:
+  - title: EPRA pump price review
+    rule: monthly
+    day: 14
+    category: personal_finance
+  - title: KNBS CPI release
+    rule: monthly
+    day: -1
+    category: economy
+  - title: School fees season
+    rule: annual
+    month: 1
+    day: 1
+    category: personal_finance
+  - title: Finance Bill season
+    rule: annual
+    month: 5
+    day: 1
+    category: law
+  - title: Budget reading
+    rule: annual
+    month: 6
+    day: 12
+    category: economy
+    note: approximate — confirm date
+  - title: Festive spending
+    rule: annual
+    month: 12
+    day: 1
+    category: personal_finance
+  # Example of a one-off date entry, e.g. an MPC meeting:
+  # - title: CBK MPC meeting
+  #   rule: date
+  #   date: 2026-12-01
+  #   category: economy

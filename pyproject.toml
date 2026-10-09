@@ -66,7 +66,7 @@ strict = true
 asyncio_mode = "auto"
 testpaths = ["tests"]
 norecursedirs = ["Flask WebAPP", ".superpowers", "spikes"]
-addopts = "--cov=kenya_data_engine --cov-fail-under=0"
+addopts = "--cov=kenya_data_engine --cov-fail-under=85"
 
 [tool.coverage.run]
 omit = ["Flask WebAPP/*"]
