@@ -11,7 +11,7 @@ from conftest import function_model_returning, mock_sources
 from typer.testing import CliRunner
 
 from kenya_data_engine.cli.app import app
-from kenya_data_engine.config import load_config
+from kenya_data_engine.config import load_sources
 from kenya_data_engine.home import EngineHome
 from kenya_data_engine.models import RadarResult, TopicList
 from kenya_data_engine.runs import RunStore
@@ -74,14 +74,13 @@ def test_init_then_run_end_to_end(tmp_path, monkeypatch, respx_mock):
 
     home = EngineHome(home_dir)
     # Fixtures are dated Oct 2026: widen the window so the test does not depend on the clock.
-    cfg = yaml.safe_load(home.config_path.read_text())
-    cfg["radar"]["since_hours"] = 24 * 365 * 100
+    cfg = yaml.safe_load(home.config_path.read_text()) or {}
+    cfg.setdefault("radar", {})["since_hours"] = 24 * 365 * 100
     home.config_path.write_text(yaml.safe_dump(cfg))
 
-    config = load_config(home)
-    mock_sources(respx_mock, config)
+    mock_sources(respx_mock, home)
     # One source fails with a message that contains a secret: it must never reach disk.
-    respx_mock.get(config.radar.feeds["nation"]).mock(
+    respx_mock.get(load_sources(home).specs["nation"].url).mock(
         side_effect=httpx.ConnectError(f"refused for {KEYS['TAVILY_API_KEY']}")
     )
     monkeypatch.setattr(

@@ -51,8 +51,6 @@ def test_defaults_load_without_user_file(tmp_home):
     assert cfg.llm.pricing.input_per_m == 0.15 and cfg.llm.pricing.output_per_m == 0.60
     assert cfg.search.providers == ["tavily", "serper"]
     assert cfg.radar.since_hours == 72 and cfg.radar.max_items == 10
-    assert set(cfg.radar.listings) == {"cbk", "knbs", "epra", "parliament"}
-    assert cfg.radar.trends_feed == "https://trends.google.com/trending/rss?geo=KE"
     assert cfg.cache_ttl_hours == 6.0 and cfg.synth.max_signals == 300
 
 
@@ -125,12 +123,6 @@ def test_weights_must_be_non_negative(tmp_home):
     with pytest.raises(ConfigError) as ei:
         load_config(tmp_home)
     assert ei.value.hint
-
-
-def test_invalid_listing_kind_raises_config_error(tmp_home):
-    tmp_home.config_path.write_text("radar:\n  listings:\n    cbk:\n      kind: bogus\n")
-    with pytest.raises(ConfigError):
-        load_config(tmp_home)
 
 
 @pytest.mark.parametrize("bad", [".nan", ".inf"])

@@ -1,0 +1,316 @@
+# Radar sources: one self-contained entry per source, keyed by name.
+#
+# Fields
+#   type:       rss | listing           (Google Trends is an rss source with kind: attention)
+#   url:        feed or page URL
+#   kind:       news | data_release | policy | attention
+#   enabled:    true (default) | false
+#   user_agent: optional per-source User-Agent override
+#   notes:      free text for auditors (status, last verified date)
+#   listing only: item, title, link, date   CSS selectors (date may be null).
+#     Comma lists are intentional unions: any alternative may match (first in document order).
+#
+# Your <home>/sources.yaml is merged over this file by name, field by field: fix one selector,
+# set `enabled: false`, or add a new source without copying the rest.
+# Audit loop: `engine sources test <name>`, edit, repeat; then upstream fixes land here.
+#
+# Entries marked "agent-sourced" are unverified until `engine doctor` passes live.
+
+nation:
+  type: rss
+  url: https://nation.africa/kenya/rss.xml
+  kind: news
+  enabled: true
+  notes: "verified live 2026-10-09 (engine doctor)"
+
+standard:
+  type: rss
+  url: https://www.standardmedia.co.ke/rss/headlines.php
+  kind: news
+  enabled: true
+  notes: "verified live 2026-10-09 (engine doctor)"
+
+business_daily:
+  type: rss
+  url: https://www.businessdailyafrica.com/bd/rss.xml
+  kind: news
+  enabled: true
+  notes: "verified live 2026-10-09 (engine doctor)"
+
+kenyans:
+  type: rss
+  url: https://www.kenyans.co.ke/feeds/news
+  kind: news
+  enabled: true
+  notes: "verified live 2026-10-09 (engine doctor)"
+
+capital_fm:
+  type: rss
+  url: https://www.capitalfm.co.ke/news/feed/
+  kind: news
+  enabled: true
+  notes: "verified live 2026-10-09 (engine doctor)"
+
+google_trends:
+  type: rss
+  url: https://trends.google.com/trending/rss?geo=KE
+  kind: attention
+  enabled: true
+  notes: "verified live 2026-10-09 (engine doctor)"
+
+the_eastafrican:
+  type: rss
+  url: https://www.theeastafrican.co.ke/tea/rss.xml
+  kind: news
+  enabled: true
+  notes: "agent-sourced, unverified until `engine doctor` passes live"
+
+the_eastafrican_business:
+  type: rss
+  url: https://www.theeastafrican.co.ke/tea/business/rss.xml
+  kind: news
+  enabled: true
+  notes: "agent-sourced, unverified until `engine doctor` passes live"
+
+kenyan_wall_street:
+  type: rss
+  url: https://kenyanwallstreet.com/feed/
+  kind: news
+  enabled: true
+  notes: "agent-sourced, unverified until `engine doctor` passes live"
+
+capital_fm_business:
+  type: rss
+  url: https://www.capitalfm.co.ke/business/feed/
+  kind: news
+  enabled: true
+  notes: "agent-sourced, unverified until `engine doctor` passes live"
+
+kbc_business:
+  type: rss
+  url: https://www.kbc.co.ke/category/business/feed/
+  kind: news
+  enabled: true
+  notes: "agent-sourced, unverified until `engine doctor` passes live"
+
+people_daily_business:
+  type: rss
+  url: https://peopledaily.digital/category/business/feed/
+  kind: news
+  enabled: true
+  notes: "agent-sourced, unverified until `engine doctor` passes live"
+
+techcabal:
+  type: rss
+  url: https://techcabal.com/feed/
+  kind: news
+  enabled: true
+  notes: "agent-sourced, unverified until `engine doctor` passes live"
+
+techpoint_africa_kenya:
+  type: rss
+  url: https://techpoint.africa/tag/kenya/feed/
+  kind: news
+  enabled: true
+  notes: "agent-sourced, unverified until `engine doctor` passes live"
+
+disrupt_africa:
+  type: rss
+  url: https://disrupt-africa.com/feed/
+  kind: news
+  enabled: true
+  notes: "agent-sourced, unverified until `engine doctor` passes live"
+
+techweez:
+  type: rss
+  url: https://techweez.com/feed/
+  kind: news
+  enabled: true
+  notes: "agent-sourced, unverified until `engine doctor` passes live"
+
+africa_the_big_deal:
+  type: rss
+  url: https://thebigdeal.substack.com/feed
+  kind: news
+  enabled: true
+  notes: "agent-sourced, unverified until `engine doctor` passes live"
+
+launch_base_africa:
+  type: rss
+  url: https://launchbaseafrica.com/feed/
+  kind: news
+  enabled: true
+  notes: "agent-sourced, unverified until `engine doctor` passes live"
+
+reddit_kenya:
+  type: rss
+  url: https://www.reddit.com/r/kenya/.rss
+  kind: news
+  enabled: true
+  user_agent: "python:kenya-data-engine:v0.1 (research)"
+  notes: "agent-sourced, unverified until `engine doctor` passes live"
+
+parliament:
+  type: listing
+  url: https://www.parliament.go.ke/the-national-assembly/house-business/bills
+  kind: policy
+  enabled: true
+  item: "table tbody tr"
+  title: "td a"
+  link: "td a"
+  date: "td:nth-child(2)"
+  notes: "verified live 2026-10-09 (engine doctor)"
+
+the_star_business:
+  type: listing
+  url: https://www.the-star.co.ke/business/
+  kind: news
+  enabled: true
+  item: "div.article-body, article, .section-article"
+  title: "h3, h2, .article-title"
+  link: "a"
+  date: "span.time, time, .date"
+  notes: "agent-sourced, unverified until `engine doctor` passes live"
+
+citizen_digital_business:
+  type: listing
+  url: https://www.citizen.digital/business
+  kind: news
+  enabled: true
+  item: "div.story-item, div.news-card, div.content-box"
+  title: "h2, h3, .story-title"
+  link: "a"
+  date: "span.timestamp, time"
+  notes: "agent-sourced, unverified until `engine doctor` passes live"
+
+cbk_press_releases:
+  type: listing
+  url: https://www.centralbank.go.ke/press-release/
+  kind: policy
+  enabled: true
+  item: "table tbody tr, div.post-item"
+  title: "td:nth-child(2) a, h3 a, h2 a"
+  link: "td:nth-child(2) a, a"
+  date: "td:nth-child(1), span.date, .entry-date"
+  notes: "agent-sourced, unverified until `engine doctor` passes live"
+
+cbk_news:
+  type: listing
+  url: https://www.centralbank.go.ke/news/
+  kind: policy
+  enabled: true
+  item: "article.post, div.news-item"
+  title: "h2.entry-title a, h3 a"
+  link: "h2.entry-title a, h3 a"
+  date: "span.entry-date, time"
+  notes: "agent-sourced, unverified until `engine doctor` passes live"
+
+cbk_weekly_bulletin:
+  type: listing
+  url: https://www.centralbank.go.ke/reports/weekly-bulletin/
+  kind: data_release
+  enabled: true
+  item: "table tbody tr, div.report-item"
+  title: "td a, h3 a"
+  link: "td a, a"
+  date: "td:first-child, span.date"
+  notes: "agent-sourced, unverified until `engine doctor` passes live"
+
+knbs_recent_releases:
+  type: listing
+  url: https://www.knbs.or.ke/recent-releases/
+  kind: data_release
+  enabled: true
+  item: "article, div.elementor-post, div.report-card"
+  title: "h3 a, h2 a, .entry-title"
+  link: "h3 a, h2 a, a"
+  date: "span.elementor-post-date, time, .entry-date"
+  notes: "agent-sourced, unverified until `engine doctor` passes live"
+
+epra_downloads_releases:
+  type: listing
+  url: https://www.epra.go.ke/downloads/
+  kind: data_release
+  enabled: true
+  item: "table tbody tr, div.wpdm-download-card, div.download-item"
+  title: "td.package-title a, h3 a, .title a"
+  link: "td.package-title a, a"
+  date: "td.date, span.date"
+  notes: "agent-sourced, unverified until `engine doctor` passes live"
+
+cma_press_releases:
+  type: listing
+  url: https://www.cma.or.ke/press-releases/
+  kind: policy
+  enabled: true
+  item: "table tbody tr, article.post"
+  title: "td a, h2.entry-title a"
+  link: "td a, h2.entry-title a"
+  date: "td.date, span.entry-date"
+  notes: "agent-sourced, unverified until `engine doctor` passes live"
+
+nse_announcements:
+  type: listing
+  url: https://www.nse.co.ke/regulatory-announcements/
+  kind: policy
+  enabled: true
+  item: "table tbody tr, div.announcement-row"
+  title: "td:nth-child(2) a, .title a"
+  link: "td:nth-child(2) a, a"
+  date: "td:nth-child(1), .date"
+  notes: "agent-sourced, unverified until `engine doctor` passes live"
+
+national_treasury_releases:
+  type: listing
+  url: https://www.treasury.go.ke/press-release/
+  kind: policy
+  enabled: true
+  item: "article.post, div.news-item"
+  title: "h2.entry-title a, h3 a"
+  link: "h2.entry-title a, h3 a"
+  date: "span.entry-date, time"
+  notes: "agent-sourced, unverified until `engine doctor` passes live"
+
+kra_public_notices:
+  type: listing
+  url: https://www.kra.go.ke/news-center/public-notices
+  kind: policy
+  enabled: true
+  item: "div.media-item, div.news-card, tr"
+  title: "h4.title a, h3 a, td a"
+  link: "h4.title a, h3 a, a"
+  date: "span.date, time, td.date"
+  notes: "agent-sourced, unverified until `engine doctor` passes live"
+
+parliament_senate:
+  type: listing
+  url: http://www.parliament.go.ke/the-senate/house-business/bills-tracker
+  kind: policy
+  enabled: true
+  item: "table.views-table tbody tr, table tbody tr"
+  title: "td:nth-child(1) a, td.views-field-title a"
+  link: "td:nth-child(1) a, td.views-field-title a"
+  date: "td:nth-child(3), td.views-field-date"
+  notes: "agent-sourced, unverified until `engine doctor` passes live"
+
+kenya_law_gazette:
+  type: listing
+  url: http://kenyalaw.org/kenyalaw/klr_app/gazette.php
+  kind: policy
+  enabled: true
+  item: "table#example tbody tr, table tbody tr"
+  title: "td:nth-child(2) a"
+  link: "td:nth-child(2) a"
+  date: "td:nth-child(1)"
+  notes: "agent-sourced, unverified until `engine doctor` passes live"
+
+trends24_kenya:
+  type: listing
+  url: https://trends24.in/kenya/
+  kind: attention
+  enabled: true
+  item: "ol.trend-card__list li"
+  title: "a"
+  link: "a"
+  date: null
+  notes: "agent-sourced, unverified until `engine doctor` passes live"

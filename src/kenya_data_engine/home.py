@@ -18,6 +18,14 @@ class EngineHome:
         return self.root / "calendar.yaml"
 
     @property
+    def sources_path(self) -> Path:
+        return self.root / "sources.yaml"
+
+    @property
+    def certs_dir(self) -> Path:
+        return self.root / "certs"
+
+    @property
     def env_path(self) -> Path:
         return self.root / ".env"
 

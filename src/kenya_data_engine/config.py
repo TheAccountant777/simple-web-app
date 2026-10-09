@@ -2,10 +2,18 @@
 
 import math
 from importlib import resources
-from typing import Any
+from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SecretStr,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from kenya_data_engine.errors import ConfigError
@@ -67,23 +75,13 @@ class SearchConfig(_Strict):
     providers: list[str] = Field(default_factory=lambda: ["tavily", "serper"])
 
 
-class ListingSpec(_Strict):
-    url: str
-    item: str
-    title: str
-    link: str
-    date: str | None = None
-    kind: SignalKind
-
-
 class RadarConfig(_Strict):
+    """Radar tuning. The sources themselves live in sources.yaml."""
+
     since_hours: int = 72
     lookahead_days: int = 21
     max_items: int = 10
-    feeds: dict[str, str]
-    trends_feed: str
-    listings: dict[str, ListingSpec]
-    enabled: list[str]
+    source_timeout_s: float = Field(default=20.0, gt=0)
 
 
 class SynthConfig(_Strict):
@@ -124,13 +122,33 @@ def _load_yaml(text: str, where: str) -> dict[str, Any]:
     return data
 
 
+LEGACY_RADAR_KEYS = frozenset({"feeds", "trends_feed", "listings", "enabled", "user_agents"})
+
+
+def _user_config(home: EngineHome) -> dict[str, Any]:
+    if not home.config_path.exists():
+        return {}
+    return _load_yaml(home.config_path.read_text(encoding="utf-8"), str(home.config_path))
+
+
+def legacy_radar_keys(home: EngineHome) -> list[str]:
+    """Pre-sources.yaml `radar.*` keys still present in the user's config.yaml (sorted)."""
+    try:
+        radar = _user_config(home).get("radar")
+    except ConfigError:
+        return []
+    return sorted(LEGACY_RADAR_KEYS & set(radar)) if isinstance(radar, dict) else []
+
+
 def load_config(home: EngineHome) -> EngineConfig:
     """Deep-merge the user's config.yaml over the packaged defaults and validate."""
     defaults = resources.files("kenya_data_engine").joinpath("defaults/config.yaml")
     merged = _load_yaml(defaults.read_text(encoding="utf-8"), "defaults/config.yaml")
-    if home.config_path.exists():
-        user = _load_yaml(home.config_path.read_text(encoding="utf-8"), str(home.config_path))
-        merged = _deep_merge(merged, user)
+    user = _user_config(home)
+    radar = user.get("radar")
+    if isinstance(radar, dict):  # legacy keys are ignored; `engine doctor` warns about them
+        user["radar"] = {k: v for k, v in radar.items() if k not in LEGACY_RADAR_KEYS}
+    merged = _deep_merge(merged, user)
     try:
         cfg = EngineConfig.model_validate(merged)
     except ValidationError as exc:
@@ -154,3 +172,69 @@ def load_config(home: EngineHome) -> EngineConfig:
             f"{sum(cfg.weights.values()):.3f}",
         )
     return cfg
+
+
+class SourceSpec(_Strict):
+    """One Radar source, as written in sources.yaml."""
+
+    type: Literal["rss", "listing"]
+    url: str
+    kind: SignalKind
+    enabled: bool = True
+    user_agent: str | None = None
+    item: str | None = None  # listing only: CSS selectors
+    title: str | None = None
+    link: str | None = None
+    date: str | None = None
+    notes: str | None = None
+
+    @model_validator(mode="after")
+    def _listing_needs_selectors(self) -> "SourceSpec":
+        if self.type == "listing":
+            missing = [f for f in ("item", "title", "link") if not getattr(self, f)]
+            if missing:
+                raise ValueError(f"listing sources need {', '.join(missing)}")
+        return self
+
+
+class Sources(BaseModel):
+    specs: dict[str, SourceSpec] = Field(default_factory=dict)
+    invalid: dict[str, str] = Field(default_factory=dict)  # name -> what is wrong
+
+
+def _describe(exc: ValidationError) -> str:
+    return "; ".join(
+        f"{'.'.join(str(x) for x in e['loc']) or 'entry'}: {e['msg']}" for e in exc.errors()
+    )
+
+
+def load_sources(home: EngineHome) -> Sources:
+    """Merge `<home>/sources.yaml` over the packaged sources by name, field by field.
+
+    Never raises: a broken entry (or an unreadable user file) lands in `invalid` and the
+    rest still load.
+    """
+    packaged = resources.files("kenya_data_engine").joinpath("defaults/sources.yaml")
+    raw: dict[str, Any] = _load_yaml(packaged.read_text(encoding="utf-8"), "defaults/sources.yaml")
+    raw = {str(k): v for k, v in raw.items()}
+    out = Sources()
+    if home.sources_path.exists():
+        try:
+            user = _load_yaml(home.sources_path.read_text(encoding="utf-8"), "sources.yaml")
+        except ConfigError as exc:
+            out.invalid["sources.yaml"] = exc.message
+            user = {}
+        for name, over in user.items():
+            base = raw.get(str(name))
+            raw[str(name)] = (
+                {**base, **over} if isinstance(base, dict) and isinstance(over, dict) else over
+            )
+    for name, entry in raw.items():
+        if not isinstance(entry, dict):
+            out.invalid[name] = "entry must be a mapping of fields"
+            continue
+        try:
+            out.specs[name] = SourceSpec.model_validate(entry)
+        except ValidationError as exc:
+            out.invalid[name] = _describe(exc)
+    return out

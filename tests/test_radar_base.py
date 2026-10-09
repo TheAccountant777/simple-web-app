@@ -1,5 +1,6 @@
 from datetime import UTC, datetime, timedelta
 
+from kenya_data_engine.config import load_sources
 from kenya_data_engine.models import RadarResult, Signal, signal_id
 from kenya_data_engine.pipeline import run_pipeline
 from kenya_data_engine.radar.base import RadarStage, build_adapters, dedupe, run_radar
@@ -85,14 +86,29 @@ async def test_radar_stage_sets_since_from_config(ctx, monkeypatch):
     assert abs(age - timedelta(hours=ctx.config.radar.since_hours)) < timedelta(minutes=1)
 
 
-def test_build_adapters_respects_enabled(ctx):
+def test_build_adapters_reads_sources_and_respects_enabled(ctx, tmp_home):
     names = {a.name for a in build_adapters(ctx.config, ctx.home)}
-    assert {"nation", "business_daily", "google_trends", "calendar"} <= names
-    cfg = ctx.config.model_copy(deep=True)
-    cfg.radar.enabled = ["trends"]
-    assert [a.name for a in build_adapters(cfg, ctx.home)] == ["google_trends"]
-    cfg.radar.enabled = []
-    assert build_adapters(cfg, ctx.home) == []
+    assert {"nation", "business_daily", "google_trends", "calendar", "cbk_news"} <= names
+    assert "the_star" not in names
+    tmp_home.sources_path.write_text(
+        "".join(f"{n}:\n  enabled: false\n" for n in load_sources(tmp_home).specs)
+    )
+    assert [a.name for a in build_adapters(ctx.config, ctx.home)] == ["calendar"]
+
+
+def test_google_trends_is_an_attention_rss_adapter(ctx):
+    trends = next(a for a in build_adapters(ctx.config, ctx.home) if a.name == "google_trends")
+    assert trends.kind == "attention"
+
+
+async def test_invalid_source_entry_becomes_a_failed_source_not_a_crash(ctx, tmp_home):
+    tmp_home.sources_path.write_text("broken:\n  type: rss\n  kind: nope\n")
+    adapters = build_adapters(ctx.config, ctx.home)
+    broken = next(a for a in adapters if a.name == "broken")
+    res = await run_radar([OkAdapter(n=2), broken], ctx, since=T0)
+    assert len(res.signals) == 2
+    assert [e.adapter for e in res.errors] == ["broken"]
+    assert "invalid source" in res.errors[0].message and "kind" in res.errors[0].message
 
 
 async def test_adapter_error_message_is_redacted(ctx):

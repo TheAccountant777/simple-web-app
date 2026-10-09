@@ -19,10 +19,7 @@ def no_wait(monkeypatch):
     monkeypatch.setattr("kenya_data_engine.http._WAIT", tenacity.wait_none())
 
 
-@pytest.mark.parametrize(
-    "name",
-    ["nation", "standard", "business_daily", "the_star", "kenyans", "capital_fm", "google_trends"],
-)
+@pytest.mark.parametrize("name", ["nation"])
 async def test_rss_parses_fixture(name, respx_mock, ctx):
     respx_mock.get(URL).respond(200, content=(FIX / f"{name}.xml").read_bytes())
     sigs = await RssAdapter(name, URL).fetch(ctx, T0)

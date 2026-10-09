@@ -1,4 +1,4 @@
-"""CSS-selector adapter for listing pages (CBK, KNBS, EPRA, Parliament)."""
+"""CSS-selector adapter for listing pages (regulators, Parliament, news section pages)."""
 
 from datetime import UTC, datetime
 from urllib.parse import urljoin
@@ -6,9 +6,9 @@ from urllib.parse import urljoin
 from dateutil import parser as dateparser
 from selectolax.lexbor import LexborHTMLParser
 
-from kenya_data_engine.config import ListingSpec
+from kenya_data_engine.config import SourceSpec
 from kenya_data_engine.context import RunContext
-from kenya_data_engine.errors import FetchError
+from kenya_data_engine.errors import ConfigError, FetchError
 from kenya_data_engine.http import fetch
 from kenya_data_engine.models import Signal, signal_id
 
@@ -22,9 +22,12 @@ def _parse_date(text: str) -> datetime | None:
 
 
 class ListingAdapter:
-    def __init__(self, name: str, spec: ListingSpec, max_items: int) -> None:
+    def __init__(self, name: str, spec: SourceSpec, max_items: int) -> None:
+        if not (spec.item and spec.title and spec.link):
+            raise ConfigError(f"{name}: a listing source needs item, title and link selectors")
         self.name = name
         self.spec = spec
+        self.item, self.title_sel, self.link_sel = spec.item, spec.title, spec.link
         self.max_items = max_items
 
     async def fetch(self, ctx: RunContext, since: datetime) -> list[Signal]:
@@ -33,21 +36,23 @@ class ListingAdapter:
             spec.url, client=ctx.http, cache=ctx.cache, ttl_hours=ctx.config.cache_ttl_hours
         )
         tree = LexborHTMLParser(res.content.decode("utf-8", errors="replace"))
-        items = tree.css(spec.item)
+        # A union like `a tr, tr` returns a node once per branch that matches it.
+        items = list({n.mem_id: n for n in tree.css(self.item)}.values())
         if not items:
             raise FetchError(
                 f"{self.name}: selector matched nothing — page layout may have changed",
-                hint="run engine doctor",
+                hint=f"run `engine sources test {self.name}`",
             )
         signals: list[Signal] = []
         for item in items:
-            title_node = item.css_first(spec.title)
+            title_node = item.css_first(self.title_sel)
             title = " ".join(title_node.text().split()) if title_node else ""
-            if not title:
-                continue
-            link_node = item.css_first(spec.link)
-            href = link_node.attributes.get("href") if link_node else None
-            url = urljoin(spec.url, href) if href else None
+            href = next(
+                (h for n in item.css(self.link_sel) if (h := n.attributes.get("href"))), None
+            )
+            if not title or not href:
+                continue  # an item we cannot use is skipped, not an error
+            url = urljoin(spec.url, href)
             date_node = item.css_first(spec.date) if spec.date else None
             published = _parse_date(date_node.text()) if date_node else None
             if published is not None and published < since:

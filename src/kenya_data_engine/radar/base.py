@@ -4,8 +4,9 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
-from kenya_data_engine.config import EngineConfig
+from kenya_data_engine.config import EngineConfig, load_sources
 from kenya_data_engine.context import RunContext
+from kenya_data_engine.errors import ConfigError, EngineError
 from kenya_data_engine.home import EngineHome
 from kenya_data_engine.models import AdapterError, RadarResult, Signal, normalize_url
 from kenya_data_engine.radar.calendar import CalendarAdapter
@@ -67,20 +68,35 @@ async def run_radar(adapters: list[Adapter], ctx: RunContext, since: datetime) -
     return RadarResult(signals=unique, errors=errors, collected_at=datetime.now(UTC))
 
 
+class BrokenAdapter:
+    """Stands in for a source whose sources.yaml entry is invalid: it fails, the run goes on."""
+
+    def __init__(self, name: str, problem: str) -> None:
+        self.name = name
+        self.problem = problem
+
+    async def fetch(self, ctx: RunContext, since: datetime) -> list[Signal]:
+        raise ConfigError(
+            f"invalid source `{self.name}`: {self.problem}",
+            hint="fix or remove it in <home>/sources.yaml",
+        )
+
+
 def build_adapters(config: EngineConfig, home: EngineHome) -> list[Adapter]:
-    enabled = set(config.radar.enabled)
-    adapters: list[Adapter] = []
-    if "rss" in enabled:
-        adapters.extend(RssAdapter(name, url) for name, url in config.radar.feeds.items())
-    if "trends" in enabled:
-        adapters.append(RssAdapter("google_trends", config.radar.trends_feed, kind="attention"))
-    if "calendar" in enabled:
-        adapters.append(CalendarAdapter(home.calendar_path, config.radar.lookahead_days))
-    adapters.extend(
-        ListingAdapter(name, spec, config.radar.max_items)
-        for name, spec in config.radar.listings.items()
-        if name in enabled
-    )
+    """One adapter per enabled source in sources.yaml, plus the calendar."""
+    sources = load_sources(home)
+    adapters: list[Adapter] = [CalendarAdapter(home.calendar_path, config.radar.lookahead_days)]
+    adapters.extend(BrokenAdapter(n, why) for n, why in sources.invalid.items())
+    for name, spec in sources.specs.items():
+        if not spec.enabled:
+            continue
+        if spec.type == "rss":
+            adapters.append(RssAdapter(name, spec.url, spec.kind))
+        else:
+            try:
+                adapters.append(ListingAdapter(name, spec, config.radar.max_items))
+            except EngineError as exc:  # unreachable for validated specs; stay robust anyway
+                adapters.append(BrokenAdapter(name, exc.message))
     return adapters
 
 

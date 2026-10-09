@@ -65,15 +65,16 @@ def function_model_returning(output):
     return FunctionModel(fn)
 
 
-def mock_sources(respx_mock, config) -> None:
-    """Serve the saved RSS/listing fixtures for every feed and listing in `config`."""
-    from pathlib import Path
+def mock_sources(respx_mock, home) -> None:
+    """Serve a minimal valid response for every source configured under `home`.
 
-    fix = Path(__file__).parent / "fixtures"
-    feeds = {**config.radar.feeds, "google_trends": config.radar.trends_feed}
-    for name, url in feeds.items():
-        respx_mock.get(url).respond(200, content=(fix / "rss" / f"{name}.xml").read_bytes())
-    for name, spec in config.radar.listings.items():
-        respx_mock.get(spec.url).respond(
-            200, content=(fix / "listing" / f"{name}.html").read_bytes()
-        )
+    Feeds get generic RSS and listings get HTML generated from their own selectors, so adding
+    a source never needs a new fixture file.
+    """
+    from sourcegen import listing_html, rss_xml
+
+    from kenya_data_engine.config import load_sources
+
+    for name, spec in load_sources(home).specs.items():
+        body = rss_xml(name) if spec.type == "rss" else listing_html(name, spec)
+        respx_mock.get(spec.url).respond(200, content=body.encode())

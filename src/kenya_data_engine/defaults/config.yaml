@@ -39,44 +39,4 @@ radar:
   since_hours: 72
   lookahead_days: 21
   max_items: 10
-  # unverified — confirm with engine doctor (Spike 3 not yet run)
-  feeds:
-    nation: https://nation.africa/kenya/rss.xml
-    standard: https://www.standardmedia.co.ke/rss/headlines.php
-    business_daily: https://www.businessdailyafrica.com/bd/rss.xml
-    the_star: https://www.the-star.co.ke/rss
-    kenyans: https://www.kenyans.co.ke/feeds/news
-    capital_fm: https://www.capitalfm.co.ke/news/feed/
-  # unverified — confirm with engine doctor
-  trends_feed: https://trends.google.com/trending/rss?geo=KE
-  # unverified — confirm with engine doctor (URLs and CSS selectors are best guesses)
-  listings:
-    cbk:
-      url: https://www.centralbank.go.ke/press-releases/
-      item: article
-      title: h2 a
-      link: h2 a
-      date: time
-      kind: policy
-    knbs:
-      url: https://www.knbs.or.ke/publications/
-      item: article
-      title: h2 a
-      link: h2 a
-      date: time
-      kind: data_release
-    epra:
-      url: https://www.epra.go.ke/category/press-releases/
-      item: article
-      title: h2 a
-      link: h2 a
-      date: time
-      kind: policy
-    parliament:
-      url: https://www.parliament.go.ke/the-national-assembly/house-business/bills
-      item: table tbody tr
-      title: td a
-      link: td a
-      date: td:nth-child(2)
-      kind: policy
-  enabled: [rss, trends, calendar, cbk, knbs, epra, parliament]
+  source_timeout_s: 20  # per source; sources themselves live in sources.yaml

@@ -9,6 +9,7 @@ from typer.testing import CliRunner
 from kenya_data_engine.cli import doctor as doctor_mod
 from kenya_data_engine.cli.app import app
 from kenya_data_engine.cli.doctor import Check, checks_table, run_checks, summary_line
+from kenya_data_engine.config import load_sources
 
 MODELS = "https://api.deepseek.com/models"
 TAVILY = "https://api.tavily.com/search"
@@ -31,15 +32,17 @@ def mock_healthy(respx_mock, ctx):
             "results": [{"title": "Kenya inflation eases", "url": "https://a.ke", "content": "x"}]
         },
     )
-    mock_sources(respx_mock, ctx.config)
+    mock_sources(respx_mock, ctx.home)
 
 
 async def test_doctor_all_healthy(respx_mock, ctx):
     mock_healthy(respx_mock, ctx)
     checks = by_name(await run_checks(ctx))
-    assert {c.status for c in checks.values()} == {"ok"}
+    assert {c.status for c in checks.values()} == {"ok"}, [
+        c for c in checks.values() if c.status != "ok"
+    ]
     assert checks["DeepSeek /models"].latency_ms is not None
-    assert checks["cbk"].group == "sources" and "signals" in checks["cbk"].detail
+    assert checks["cbk_news"].group == "sources" and "signals" in checks["cbk_news"].detail
 
 
 async def test_doctor_missing_deepseek_key_fails(respx_mock, ctx_no_keys):
@@ -77,7 +80,7 @@ async def test_doctor_llm_failures(respx_mock, ctx, status, expect):
 
 async def test_doctor_source_exception_becomes_fail_check(respx_mock, ctx):
     mock_healthy(respx_mock, ctx)
-    respx_mock.get(ctx.config.radar.feeds["nation"]).mock(
+    respx_mock.get(load_sources(ctx.home).specs["nation"].url).mock(
         side_effect=httpx.ConnectError("boom fake-tavily")
     )
     checks = by_name(await run_checks(ctx))  # must not raise
@@ -88,7 +91,7 @@ async def test_doctor_source_exception_becomes_fail_check(respx_mock, ctx):
 
 async def test_doctor_empty_source_warns(respx_mock, ctx):
     mock_healthy(respx_mock, ctx)
-    respx_mock.get(ctx.config.radar.feeds["nation"]).respond(200, content=b"not a feed")
+    respx_mock.get(load_sources(ctx.home).specs["nation"].url).respond(200, content=b"not a feed")
     assert by_name(await run_checks(ctx))["nation"].status == "warn"
 
 
