@@ -23,6 +23,7 @@ def test_home_paths_and_ensure(tmp_path):
     home = EngineHome(tmp_path / "h")
     home.ensure()
     assert home.runs_dir.is_dir() and home.briefs_dir.is_dir()
+    assert home.blobs_dir.is_dir()
     assert home.config_path == tmp_path / "h" / "config.yaml"
     assert home.calendar_path.name == "calendar.yaml"
     assert home.env_path.name == ".env" and home.db_path.name == "engine.db"

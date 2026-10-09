@@ -41,10 +41,15 @@ class EngineHome:
     def briefs_dir(self) -> Path:
         return self.root / "briefs"
 
+    @property
+    def blobs_dir(self) -> Path:
+        return self.root / "blobs"
+
     def ensure(self) -> None:
         self.root.mkdir(parents=True, exist_ok=True)
         self.runs_dir.mkdir(exist_ok=True)
         self.briefs_dir.mkdir(exist_ok=True)
+        self.blobs_dir.mkdir(exist_ok=True)
 
     @classmethod
     def resolve(cls, explicit: Path | None = None) -> "EngineHome":

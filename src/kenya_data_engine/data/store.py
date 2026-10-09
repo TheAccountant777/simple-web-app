@@ -1,0 +1,195 @@
+"""Content-addressed blob store and the vintaged series store."""
+
+import hashlib
+import os
+import sqlite3
+import tempfile
+import time
+from contextlib import closing
+from datetime import date, datetime, timedelta
+from decimal import Decimal
+from pathlib import Path
+from typing import Any, NamedTuple
+
+from kenya_data_engine.data.models import Observation, Provenance, StoredObservation
+from kenya_data_engine.data.periods import Period
+
+
+class BlobStore:
+    def __init__(self, root: Path) -> None:
+        self.root = root
+        root.mkdir(parents=True, exist_ok=True)
+
+    def path(self, sha: str) -> Path:
+        return self.root / sha[:2] / sha
+
+    def put(self, content: bytes) -> str:
+        sha = hashlib.sha256(content).hexdigest()
+        target = self.path(sha)
+        if target.exists():
+            return sha
+        target.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=target.parent, prefix=".tmp-")
+        try:
+            with os.fdopen(fd, "wb") as fh:
+                fh.write(content)
+            os.replace(tmp, target)
+        except BaseException:
+            Path(tmp).unlink(missing_ok=True)
+            raise
+        return sha
+
+    def get(self, sha: str) -> bytes:
+        return self.path(sha).read_bytes()
+
+    def prune(self, older_than: timedelta, keep: set[str]) -> int:
+        """Delete blobs not in `keep` whose mtime is older than `older_than`."""
+        cutoff = time.time() - older_than.total_seconds()
+        removed = 0
+        for f in self.root.glob("*/*"):
+            if f.name.startswith(".tmp-") or f.name in keep or not f.is_file():
+                continue
+            if f.stat().st_mtime < cutoff:
+                f.unlink()
+                removed += 1
+        return removed
+
+
+class AddResult(NamedTuple):
+    new: int
+    unchanged: int
+    revised: int
+
+
+_COLUMNS = (
+    "series, period_label, period_type, start, end, entity, metric, value, unit, vintage, "
+    "url, blob, retrieved_at, published, locator, extractor"
+)
+
+
+class SeriesStore:
+    def __init__(self, db_path: Path) -> None:
+        self.db_path = db_path
+        with closing(self._connect()) as conn, conn:
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS observations ("
+                "series TEXT, period_label TEXT, period_type TEXT, start TEXT, end TEXT, "
+                "entity TEXT, metric TEXT, value TEXT, unit TEXT, vintage INTEGER, "
+                "url TEXT, blob TEXT, retrieved_at TEXT, published TEXT, locator TEXT, "
+                "extractor TEXT, "
+                "PRIMARY KEY (series, period_label, entity, metric, vintage))"
+            )
+
+    def _connect(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self.db_path)
+        conn.execute("PRAGMA journal_mode=WAL")
+        return conn
+
+    def add(self, obs: list[Observation]) -> AddResult:
+        new = unchanged = revised = 0
+        with closing(self._connect()) as conn, conn:
+            for o in obs:
+                key = (o.series, o.period.label, o.entity, o.metric)
+                row = conn.execute(
+                    "SELECT value, vintage FROM observations WHERE series=? AND period_label=? "
+                    "AND entity=? AND metric=? ORDER BY vintage DESC LIMIT 1",
+                    key,
+                ).fetchone()
+                if row is not None and Decimal(row[0]) == o.value:
+                    unchanged += 1
+                    continue
+                vintage = 1 if row is None else row[1] + 1
+                p = o.provenance
+                conn.execute(
+                    f"INSERT INTO observations ({_COLUMNS}) VALUES ({','.join('?' * 16)})",
+                    (
+                        o.series,
+                        o.period.label,
+                        o.period.type,
+                        o.period.start.isoformat(),
+                        o.period.end.isoformat(),
+                        o.entity,
+                        o.metric,
+                        str(o.value),
+                        o.unit,
+                        vintage,
+                        p.url,
+                        p.blob_sha256,
+                        p.retrieved_at.isoformat(),
+                        p.published.isoformat() if p.published else None,
+                        p.locator,
+                        p.extractor,
+                    ),
+                )
+                if row is None:
+                    new += 1
+                else:
+                    revised += 1
+        return AddResult(new, unchanged, revised)
+
+    @staticmethod
+    def _to_obs(r: tuple[Any, ...], revised: bool) -> StoredObservation:
+        return StoredObservation(
+            series=r[0],
+            period=Period(
+                type=r[2],
+                start=date.fromisoformat(r[3]),
+                end=date.fromisoformat(r[4]),
+                label=r[1],
+            ),
+            entity=r[5],
+            metric=r[6],
+            value=Decimal(r[7]),
+            unit=r[8],
+            vintage=r[9],
+            revised=revised,
+            provenance=Provenance(
+                url=r[10],
+                blob_sha256=r[11],
+                retrieved_at=datetime.fromisoformat(r[12]),
+                published=date.fromisoformat(r[13]) if r[13] else None,
+                locator=r[14],
+                extractor=r[15],
+            ),
+        )
+
+    def _rows(self, sql: str, args: tuple[Any, ...]) -> list[tuple[Any, ...]]:
+        with closing(self._connect()) as conn:
+            return conn.execute(sql, args).fetchall()
+
+    def _revised(self, r: tuple[Any, ...]) -> bool:
+        rows = self._rows(
+            "SELECT value FROM observations WHERE series=? AND period_label=? AND entity=? "
+            "AND metric=? AND vintage<?",
+            (r[0], r[1], r[5], r[6], r[9]),
+        )
+        return any(Decimal(v[0]) != Decimal(r[7]) for v in rows)
+
+    def latest(self, series: str, entity: str | None = None) -> list[StoredObservation]:
+        sql = (
+            f"SELECT {_COLUMNS} FROM observations o WHERE series=? "
+            "AND vintage = (SELECT MAX(vintage) FROM observations i WHERE i.series=o.series "
+            "AND i.period_label=o.period_label AND i.entity=o.entity AND i.metric=o.metric)"
+        )
+        args: tuple[Any, ...] = (series,)
+        if entity is not None:
+            sql += " AND entity=?"
+            args += (entity,)
+        sql += " ORDER BY start, period_label, entity, metric"
+        return [self._to_obs(r, self._revised(r)) for r in self._rows(sql, args)]
+
+    def history(
+        self, series: str, period_label: str, entity: str, metric: str
+    ) -> list[StoredObservation]:
+        rows = self._rows(
+            f"SELECT {_COLUMNS} FROM observations WHERE series=? AND period_label=? AND entity=? "
+            "AND metric=? ORDER BY vintage",
+            (series, period_label, entity, metric),
+        )
+        return [self._to_obs(r, self._revised(r)) for r in rows]
+
+    def series_keys(self) -> list[str]:
+        return [r[0] for r in self._rows("SELECT DISTINCT series FROM observations ORDER BY 1", ())]
+
+    def referenced_blobs(self) -> set[str]:
+        return {r[0] for r in self._rows("SELECT DISTINCT blob FROM observations", ())}
