@@ -63,3 +63,17 @@ def function_model_returning(output):
         return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, args)])
 
     return FunctionModel(fn)
+
+
+def mock_sources(respx_mock, config) -> None:
+    """Serve the saved RSS/listing fixtures for every feed and listing in `config`."""
+    from pathlib import Path
+
+    fix = Path(__file__).parent / "fixtures"
+    feeds = {**config.radar.feeds, "google_trends": config.radar.trends_feed}
+    for name, url in feeds.items():
+        respx_mock.get(url).respond(200, content=(fix / "rss" / f"{name}.xml").read_bytes())
+    for name, spec in config.radar.listings.items():
+        respx_mock.get(spec.url).respond(
+            200, content=(fix / "listing" / f"{name}.html").read_bytes()
+        )
