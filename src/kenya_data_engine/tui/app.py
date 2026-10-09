@@ -11,6 +11,7 @@ from kenya_data_engine.home import EngineHome
 from kenya_data_engine.pipeline import Stage
 from kenya_data_engine.runs import RunStore
 from kenya_data_engine.tui.runs import RunsPane
+from kenya_data_engine.tui.sources import SourcesPane
 from kenya_data_engine.tui.widgets import HelpScreen, make_scrubber
 
 TABS = ("live", "runs", "sources", "performance")
@@ -49,7 +50,7 @@ class EngineRoom(App[None]):
             with TabPane("2 Runs", id="runs"):
                 yield RunsPane(self.home, self.scrub)
             with TabPane("3 Sources", id="sources"):
-                yield Static("Sources view — coming next.", classes="placeholder")
+                yield SourcesPane(self.home, self.scrub)
             with TabPane("4 Performance", id="performance"):
                 yield Static("Performance view — coming next.", classes="placeholder")
         yield Footer()
