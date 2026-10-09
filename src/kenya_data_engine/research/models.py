@@ -158,6 +158,8 @@ class Claim(BaseModel):
     legal_date: date | None = None
     sensitive: bool = False
     stale: bool = False
+    generic: bool = False  # rests on a figure from a model-chosen locator (caps at inference)
+    published: date | None = None  # of the evidence (or figures) the claim rests on
     conflicts: list[str] = []
 
 

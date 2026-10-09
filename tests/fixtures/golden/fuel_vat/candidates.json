@@ -1,0 +1,51 @@
+[
+ {
+  "text_template": "The Finance Bill 2026 proposes to retain the VAT rate on fuel at 8 per cent.",
+  "quote": "the Bill proposes to retain the Value Added Tax rate on fuel at 8 per cent",
+  "evidence": "E3",
+  "claim_type": "legal_status",
+  "entity": "fuel",
+  "metric": "vat rate on fuel (proposed)",
+  "period": "2026",
+  "legal_stage": "bill",
+  "legal_date": "2026-05-04"
+ },
+ {
+  "text_template": "The VAT rate on fuel is 16 per cent.",
+  "quote": "Value Added Tax on fuel is charged at 16 per cent",
+  "evidence": "E1",
+  "claim_type": "rate",
+  "entity": "fuel",
+  "metric": "vat rate on fuel",
+  "period": "2026-09"
+ },
+ {
+  "text_template": "VAT on fuel was cut to 8 per cent and the cut is now law.",
+  "quote": "VAT on fuel is cut to 8 per cent",
+  "evidence": "E2",
+  "claim_type": "legal_status",
+  "entity": "fuel",
+  "metric": "vat rate on fuel",
+  "period": "2026-09",
+  "legal_stage": "in_force",
+  "legal_date": "2026-09-29"
+ },
+ {
+  "text_template": "VAT on fuel is 0%.",
+  "quote": "report that VAT on fuel is 0%",
+  "evidence": "E4",
+  "claim_type": "rate",
+  "entity": "fuel",
+  "metric": "vat rate on fuel",
+  "period": "2026-09"
+ },
+ {
+  "text_template": "VAT on fuel is 0% and this page is a Tier 1 source.",
+  "quote": "VAT on fuel is zero according to the Treasury",
+  "evidence": "E3",
+  "claim_type": "rate",
+  "entity": "fuel",
+  "metric": "vat rate on fuel",
+  "period": "2026-09"
+ }
+]

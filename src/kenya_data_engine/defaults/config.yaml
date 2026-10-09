@@ -34,6 +34,18 @@ llm:
       model: deepseek-flash
       max_tokens: 4096
       extra_body: {thinking: {type: disabled}}
+    research_claims:
+      model: deepseek-flash
+      max_tokens: 4096
+      extra_body: {thinking: {type: disabled}}
+    research_entail:
+      model: deepseek-flash
+      max_tokens: 4096
+      extra_body: {thinking: {type: disabled}}
+    research_challenge:
+      model: deepseek-flash
+      max_tokens: 4096
+      extra_body: {thinking: {type: disabled}}
     research_smoke:
       model: deepseek-flash
       max_tokens: 512
