@@ -18,7 +18,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from kenya_data_engine.errors import ConfigError
 from kenya_data_engine.home import EngineHome
-from kenya_data_engine.models import SignalKind
 
 WEIGHT_KEYS = frozenset({"data_ability", "wallet_impact", "timeliness", "clarity_gap", "novelty"})
 
@@ -179,7 +178,7 @@ class SourceSpec(_Strict):
 
     type: Literal["rss", "listing"]
     url: str
-    kind: SignalKind
+    kind: Literal["news", "data_release", "policy", "attention"]
     enabled: bool = True
     user_agent: str | None = None
     item: str | None = None  # listing only: CSS selectors

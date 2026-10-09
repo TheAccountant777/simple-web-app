@@ -104,7 +104,8 @@ def test_google_trends_is_an_attention_rss_adapter(ctx):
 async def test_invalid_source_entry_becomes_a_failed_source_not_a_crash(ctx, tmp_home):
     tmp_home.sources_path.write_text("broken:\n  type: rss\n  kind: nope\n")
     adapters = build_adapters(ctx.config, ctx.home)
-    broken = next(a for a in adapters if a.name == "broken")
+    assert adapters[-1].name == "broken"  # reported last, after the working sources
+    broken = adapters[-1]
     res = await run_radar([OkAdapter(n=2), broken], ctx, since=T0)
     assert len(res.signals) == 2
     assert [e.adapter for e in res.errors] == ["broken"]

@@ -180,7 +180,8 @@ def _print_test(res: SourceTest) -> None:
         )
     for item in res.items:
         when = item.date.date().isoformat() if item.date else "no date"
-        console.print(Text(f"    {item.title[:70]} | {when} | {item.url or '-'}", style="muted"))
+        line = Text(f"    {item.title[:70]} | {when} | {item.url or '-'}", style="muted")
+        console.print(line, soft_wrap=True)
 
 
 @guarded

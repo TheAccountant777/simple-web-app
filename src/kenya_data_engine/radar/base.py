@@ -115,7 +115,6 @@ def build_adapters(
     """One adapter per enabled source in sources.yaml, plus the calendar."""
     sources = load_sources(home)
     adapters: list[Adapter] = [CalendarAdapter(home.calendar_path, config.radar.lookahead_days)]
-    adapters.extend(BrokenAdapter(n, why) for n, why in sources.invalid.items())
     for name, spec in sources.specs.items():
         if not spec.enabled and not include_disabled:
             continue
@@ -126,6 +125,7 @@ def build_adapters(
                 adapters.append(ListingAdapter(name, spec, config.radar.max_items))
             except EngineError as exc:  # unreachable for validated specs; stay robust anyway
                 adapters.append(BrokenAdapter(name, exc.message))
+    adapters.extend(BrokenAdapter(n, why) for n, why in sources.invalid.items())
     return adapters
 
 

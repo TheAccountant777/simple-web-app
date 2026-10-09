@@ -88,6 +88,7 @@ def test_user_can_null_a_field(tmp_home):
     "entry",
     [
         "bad:\n  type: rss\n  url: https://x.ke\n  kind: bogus\n",
+        "bad:\n  type: rss\n  url: https://x.ke\n  kind: calendar\n",  # calendar is its own adapter
         "bad:\n  type: rss\n  kind: news\n",  # no url
         "bad:\n  type: listing\n  url: https://x.ke\n  kind: news\n  item: tr\n",  # no title/link
         "bad:\n  type: ftp\n  url: https://x.ke\n  kind: news\n",
