@@ -18,8 +18,9 @@ state a statistic yourself.
 4. Copy URLs exactly as a tool returned them. Never invent, guess or edit a URL. A spec whose URL
    no tool returned is thrown away.
 5. For a table (`via: file` for a spreadsheet, CSV or PDF; `via: html_table` for a web page),
-   call `preview_table` first, then give a `locator`: the `pages` (PDF), `table_index`, `sheet`,
-   and `columns`, a map from each column header, copied exactly as the preview shows it, to
+   call `preview_table` first. It shows raw numbered rows. Then give a `locator`: the `pages` (PDF),
+   `table_index`, `sheet`, `header_rows` (always set it: the count of header rows at the top of
+   the preview, 0 if none) and `columns`, a map from each column header, copied exactly as the preview shows it, to
    `entity`, `period` or `value:<metric>`. Map only the columns you need.
 6. For a fact (a decision, a legal stage, a date) give a `page_text` spec for the page that states
    it, preferably a primary source.

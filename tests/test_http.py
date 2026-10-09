@@ -322,3 +322,11 @@ async def test_peer_check_skipped_for_proxied_transport(respx_mock, cache):
             "https://rebind.ke/x", client=c, cache=cache, ttl_hours=1, policy=_policy()
         )
         assert got.content == b"x"
+
+
+def test_peer_check_fails_safe_without_httpx_internals():
+    from kenya_data_engine.http import _check_peer
+
+    resp = httpx.Response(200, extensions={"network_stream": _FakeStream(("169.254.169.254", 443))})
+    with pytest.raises(UnsafeUrl, match="non-public"):
+        _check_peer(resp, object(), "https://rebind.ke/x")  # type: ignore[arg-type]

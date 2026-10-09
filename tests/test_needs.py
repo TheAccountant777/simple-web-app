@@ -68,7 +68,7 @@ async def test_execute_registry_spec(ctx, respx_mock, tmp_path):
     spec = DataSourceSpec(
         need="n1", via="registry", registry_key="wb:FP.CPI.TOTL.ZG", publisher="wb", why="w"
     )
-    need = DataNeed(id="n1", kind="series", question="q", min_points=2)
+    need = DataNeed(id="n1", kind="series", question="q", min_points=2, frequency="annual")
     res = await execute(spec, need, deps)
     assert res.error is None and not res.generic
     assert res.series_keys == ["wb:FP.CPI.TOTL.ZG"] and res.points == 2
@@ -84,7 +84,7 @@ async def test_execute_generic_xlsx_columns_map(ctx, respx_mock, tmp_path):
     _allow(deps, XLSX_URL)
     res = await execute(_file_spec(), _need(), deps)
     assert res.error is None and res.generic and res.report.status == "accepted"
-    assert res.points == 3 and len(res.series_keys) == 1  # the "-" cell is simply missing
+    assert res.points == 2 and len(res.series_keys) == 1  # the "-" cell is simply missing
     key = res.series_keys[0]
     assert key.startswith("disc:www.knbs.or.ke:") and len(key.split(":")[2]) == 8
     rows = SeriesStore(ctx.home.db_path).latest(key)
@@ -171,12 +171,12 @@ def test_need_status_series_points_and_period(ctx, tmp_path):
     def st(**kw):
         return need_status(_need(**kw), res, store, deps.book, 2)
 
-    s = st(period_start=date(2026, 8, 1), period_end=date(2026, 9, 30), min_points=4)
-    assert (s.status, s.points, s.round, s.series_keys) == ("satisfied", 4, 2, ["s1"])
+    s = st(period_start=date(2026, 8, 1), period_end=date(2026, 9, 30), min_points=2)
+    assert (s.status, s.points, s.round, s.series_keys) == ("satisfied", 2, 2, ["s1"])
     assert st(period_start=date(2026, 8, 1), min_points=5).status == "partial"
-    assert st(period_start=date(2026, 8, 1), period_end=date(2026, 8, 31), min_points=3).points == 2
+    assert st(period_start=date(2026, 8, 1), period_end=date(2026, 8, 31), min_points=3).points == 1
     assert st(period_start=date(2027, 1, 1)).status == "not_found"
-    assert st(entities=[], min_points=1).points == 10  # any entity
+    assert st(entities=[], min_points=1).points == 5  # any entity
     assert st(entities=["nairobi"], period_start=date(2020, 1, 1), min_points=1).points == 5
     assert st(entities=["Nakuru"]).status == "not_found"
     errored = [ExecResult(spec=res[0].spec, error="boom")]
@@ -201,3 +201,49 @@ def test_need_status_fact_by_tier(ctx, tmp_path, urls, expected):
     need = DataNeed(id="n3", kind="fact", question="stage?")
     s = need_status(need, results, SeriesStore(tmp_path / "s.db"), deps.book, 1)
     assert s.status == expected and s.evidence_ids == ids
+
+
+def _status_for(ctx, tmp_path, obs, **need_kw):
+    store = SeriesStore(tmp_path / "s2.db")
+    store.add(obs)
+    deps = make_deps(ctx, tmp_path)
+    spec = DataSourceSpec(need="n1", via="file", publisher="p", why="w", url="u")
+    res = [ExecResult(spec=spec, series_keys=["s"])]
+    return need_status(_need(**need_kw), res, store, deps.book, 1)
+
+
+def test_points_count_periods_for_time_series_and_entities_for_rankings(ctx, tmp_path):
+    towns = ["A", "B", "C", "D", "E"]
+    one_month = [_obs("s", t, month(2026, 9)) for t in towns]
+    s = _status_for(ctx, tmp_path, one_month, entities=towns, min_points=2)
+    assert s.points == 1 and s.status == "partial"  # 5 towns x 1 month = 1 point
+    year_of_months = [_obs("s", "A", month(2026, m)) for m in range(1, 13)]
+    s = _status_for(ctx, tmp_path, year_of_months, entities=["A"], min_points=12)
+    assert s.points == 12 and s.status == "satisfied"
+    s = _status_for(ctx, tmp_path, one_month, entities=towns, frequency="none", min_points=5)
+    assert s.points == 5 and s.status == "satisfied"
+
+
+async def test_missing_entity_column_is_noted(ctx, respx_mock, tmp_path):
+    respx_mock.get("https://www.knbs.or.ke/robots.txt").respond(404)
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(["Month", "Super"])
+    ws.append(["2026-08", 180.5])
+    ws.append(["2026-09", 182])
+    buf = io.BytesIO()
+    wb.save(buf)
+    respx_mock.get(XLSX_URL).respond(200, content=buf.getvalue())
+    deps = make_deps(ctx, tmp_path)
+    _allow(deps, XLSX_URL)
+    cols = {"Month": "period", "Super": "value:super_petrol"}
+    spec = _file_spec().model_copy(update={"locator": Locator(columns=cols, header_rows=1)})
+    need = _need(entities=["Nairobi", "Mombasa"], min_points=2)
+    res = await execute(spec, need, deps)
+    store = SeriesStore(ctx.home.db_path)
+    st = need_status(need, [res], store, deps.book, 1)
+    assert "entity not in source table; values assigned to Kenya" in st.notes
+    assert st.status == "not_found"  # Kenya is not a requested entity: no silent mismatch
+    one = need.model_copy(update={"entities": ["Nairobi"]})
+    res = await execute(spec, one, deps)
+    assert not res.notes and need_status(one, [res], store, deps.book, 1).status == "satisfied"

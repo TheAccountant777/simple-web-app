@@ -46,7 +46,12 @@ async def test_memory_hit_skips_llm(ctx, tmp_path):
     remembered = _spec(GOOD, need="n9")
     deps = make_deps(ctx, tmp_path, memory=FakeMemory([remembered]))
     res = await scout(_need(), deps, model=model)
-    assert calls == [] and res.memory_hit and not res.llm_used and res.specs == [remembered]
+    assert (
+        calls == []
+        and res.memory_hit
+        and not res.llm_used
+        and res.specs == [remembered.model_copy(update={"need": "n1"})]
+    )
     assert GOOD in deps.memory_urls  # the tools now accept it
 
 
@@ -91,3 +96,19 @@ def test_scout_prompt_rules():
     assert "2026-10-09" in text and "{{" not in text and "Kenya context" in text
     for needle in ("at most 4 times", "Never invent", "preview_table", "untrusted", "empty list"):
         assert needle in text
+
+
+async def test_memory_specs_are_vetted_and_fall_through(ctx, tmp_path):
+    dead = DataSourceSpec(
+        need="n1", via="registry", registry_key="imf:cpi", publisher="imf", why="w"
+    )  # disabled in the catalog
+    good = _spec(GOOD)
+    model, calls = _counting_model({"specs": []})
+    deps = make_deps(ctx, tmp_path, memory=FakeMemory([dead]))
+    res = await scout(_need(), deps, model=model)
+    assert calls == [1] and res.llm_used and not res.memory_hit and res.specs == []
+    assert any("unknown registry key" in r for r in res.rejected)
+    deps = make_deps(ctx, tmp_path, memory=FakeMemory([dead, good]))
+    res = await scout(_need(), deps, model=model)
+    assert calls == [1] and res.memory_hit and res.specs == [good]
+    assert len(res.rejected) == 1

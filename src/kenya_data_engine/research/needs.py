@@ -40,6 +40,7 @@ _PERIOD_TYPES: dict[str, PeriodType] = {
     "annual": "year",
     "cycle": "epra_cycle",
 }
+NO_ENTITY_NOTE = "entity not in source table; values assigned to"
 _NOTE_FAILURES = 3  # check failures quoted per result in a need's notes
 
 
@@ -51,6 +52,7 @@ class ExecResult(BaseModel):
     report: CheckReport | None = None
     generic: bool = False  # extracted by a model-chosen locator, not a registry parser
     error: str | None = None
+    notes: list[str] = []
 
 
 def _shown(text: str) -> str:
@@ -65,14 +67,18 @@ def _in_range(o: StoredObservation, need: DataNeed) -> bool:
 
 
 def _count(store: SeriesStore, keys: list[str], need: DataNeed) -> int:
-    """Stored observations (latest vintage) in the need's period range, for its entities."""
+    """Points in the need's period range for its entities (R8).
+
+    Time series (frequency set): distinct periods. Frequency "none" (a ranking or snapshot):
+    distinct entities.
+    """
     wanted = {e.strip().lower() for e in need.entities}
-    total = 0
+    seen: set[str] = set()
     for key in dict.fromkeys(keys):
         for o in store.latest(key):
             if (not wanted or o.entity.strip().lower() in wanted) and _in_range(o, need):
-                total += 1
-    return total
+                seen.add(o.entity.strip().lower() if need.frequency == "none" else o.period.label)
+    return len(seen)
 
 
 # --- generic table extraction -----------------------------------------------------------------
@@ -86,6 +92,7 @@ def _build_observations(
     *,
     series: str,
     prov: tuple[str, str, datetime],
+    notes: list[str],
 ) -> tuple[list[Observation], list[str]]:
     columns = {str(k).strip().lower(): str(v) for k, v in locator.columns.items()}
     if not columns:
@@ -104,6 +111,8 @@ def _build_observations(
         raise ExtractError("locator.columns has no period column and the spec gives no period")
     canon = {e.strip().lower(): e for e in need.entities}
     default_entity = need.entities[0] if len(need.entities) == 1 else "Kenya"
+    if entity_col is None and len(need.entities) > 1:
+        notes.append(f"{NO_ENTITY_NOTE} {default_entity}")
     url, sha, retrieved = prov
     out: list[Observation] = []
     rejects: list[str] = []
@@ -185,6 +194,7 @@ async def _execute_table(
     host = urlsplit(res.url).hostname or "unknown"
     ident = f"{url}|{locator.model_dump_json()}|{need.metric}"
     series = f"disc:{host}:{hashlib.sha256(ident.encode()).hexdigest()[:8]}"
+    notes: list[str] = []
     obs, rejects = _build_observations(
         tables[locator.table_index],
         locator,
@@ -192,11 +202,12 @@ async def _execute_table(
         spec,
         series=series,
         prov=(ctx.tracer.redact(res.url), sha, res.fetched_at),
+        notes=notes,
     )
     store = SeriesStore(ctx.home.db_path)
     report = check_observations(obs, _series_spec(series, need, obs), store.latest(series), rejects)
     if report.status != "accepted":
-        return ExecResult(spec=spec, report=report, generic=True)
+        return ExecResult(spec=spec, report=report, generic=True, notes=notes)
     store.add(obs)
     return ExecResult(
         spec=spec,
@@ -204,6 +215,7 @@ async def _execute_table(
         points=_count(store, [series], need),
         report=report,
         generic=True,
+        notes=notes,
     )
 
 
@@ -258,6 +270,7 @@ def need_status(
     notes: list[str] = []
     for r in results:
         label = r.spec.url or r.spec.registry_key or r.spec.via
+        notes.extend(r.notes)
         if r.error:
             notes.append(f"{label}: {r.error}")
         if r.report is not None and r.report.status == "quarantined":

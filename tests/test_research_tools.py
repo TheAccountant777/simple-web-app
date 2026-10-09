@@ -146,8 +146,9 @@ async def test_preview_table_xlsx(ctx, tmp_path, respx_mock, data_net):
     deps.book.seen_urls.add(url)
     out = await preview_table(_pai(deps), url)
     lines = out.splitlines()
-    assert lines[0].startswith("table 0 of 1") and lines[1] == "Town | Super"
-    assert len(lines) == 2 + 5 and lines[2] == "T0 | 180"
+    assert lines[0].startswith("table 0 of 1") and "header_rows" in lines[0]
+    assert lines[1] == "row 1: Town | Super" and lines[2] == "row 2: T0 | 180"
+    assert len(lines) == 1 + 8 and lines[-1] == "row 8: T6 | 186"
     assert "out of range" in await preview_table(_pai(deps), url, table_index=3)
 
 

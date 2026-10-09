@@ -25,7 +25,7 @@ from kenya_data_engine.tools.search import FallbackSearch
 
 READ_CHARS = 8_000
 MAX_LINKS = 40
-PREVIEW_ROWS = 5
+PREVIEW_ROWS = 8
 _STOP_WORDS = 2  # query words of this length or shorter are ignored
 
 
@@ -212,7 +212,7 @@ async def list_links(ctx: Ctx, url: str, contains: str = "") -> str:
 
 
 async def preview_table(ctx: Ctx, url: str, page: int | None = None, table_index: int = 0) -> str:
-    """Show the header and first rows of a table, to choose a locator (not to read values)."""
+    """Show the first raw rows of a table, numbered, to choose a locator (not to read values)."""
     deps = ctx.deps
     if not url_allowed(deps, url):
         _note(deps, f"preview_table {url}: rejected, unknown url")
@@ -227,7 +227,7 @@ async def preview_table(ctx: Ctx, url: str, page: int | None = None, table_index
             return _ROBOTS
         _seen(deps, res.url)
         tables = await extract_tables(
-            res.content, Locator(pages=[page] if page else []), deps.ctx.config.data
+            res.content, Locator(pages=[page] if page else [], header_rows=0), deps.ctx.config.data
         )
         if not tables:
             _note(deps, f"preview_table {url}: no tables")
@@ -236,10 +236,13 @@ async def preview_table(ctx: Ctx, url: str, page: int | None = None, table_index
             _note(deps, f"preview_table {url}: table_index {table_index} out of range")
             return f"error: table_index {table_index} out of range; {len(tables)} tables found"
         t = tables[table_index]
-        lines = [" | ".join(t.header), *(" | ".join(row) for row in t.rows[:PREVIEW_ROWS])]
+        lines = [
+            f"row {i}: " + " | ".join(row) for i, row in enumerate(t.rows[:PREVIEW_ROWS], start=1)
+        ]
         _note(deps, f"preview_table {url}: table {table_index} of {len(tables)}")
         return deps.ctx.tracer.redact(
-            f"table {table_index} of {len(tables)} ({len(t.rows)} rows)\n" + "\n".join(lines)
+            f"table {table_index} of {len(tables)} ({len(t.rows)} rows, raw; "
+            "set locator.header_rows to the number of header rows)\n" + "\n".join(lines)
         )
     except Exception as exc:
         return _err(deps, "preview_table", exc)

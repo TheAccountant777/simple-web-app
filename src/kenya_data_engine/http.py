@@ -86,7 +86,12 @@ def _check_peer(resp: httpx.Response, client: httpx.AsyncClient, url: str) -> No
     """
     # A mount that differs from the default transport is a proxy (NO_PROXY makes None mounts
     # that still use the default transport, and those must be checked).
-    if client._transport_for_url(httpx.URL(url)) is not client._transport:
+    # If httpx internals change and we cannot tell, fail safe: do the check.
+    try:
+        proxied = client._transport_for_url(httpx.URL(url)) is not client._transport
+    except AttributeError:
+        proxied = False
+    if proxied:
         return
     stream = resp.extensions.get("network_stream")
     info = stream.get_extra_info("server_addr") if stream is not None else None

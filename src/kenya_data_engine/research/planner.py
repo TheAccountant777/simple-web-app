@@ -1,5 +1,6 @@
 """Planner agent: topic in, ResearchBrief out. Ids and labels are normalised in code."""
 
+import re
 from datetime import date
 
 from pydantic import BaseModel
@@ -40,14 +41,17 @@ def build_planner() -> Agent[ResearchDeps, ResearchBrief]:
     )
 
 
+def _escape(text: str) -> str:
+    return re.sub(r"<(\s*/\s*topic)", r"<\\\1", text, flags=re.IGNORECASE)
+
+
 def topic_prompt(topic: TopicInput) -> str:
     lines = [f"Topic: {topic.title}", f"Summary: {topic.summary}"]
     if topic.why_now:
         lines.append(f"Why now: {topic.why_now}")
     if topic.signals:
-        body = "\n".join(f"- {s}" for s in topic.signals)
-        lines.append(f'<signals untrusted="true">\n{body}\n</signals>')
-    return "\n".join(lines)
+        lines.append("Signals:\n" + "\n".join(f"- {s}" for s in topic.signals))
+    return '<topic untrusted="true">\n' + _escape("\n".join(lines)) + "\n</topic>"
 
 
 def _normalise(brief: ResearchBrief) -> ResearchBrief:

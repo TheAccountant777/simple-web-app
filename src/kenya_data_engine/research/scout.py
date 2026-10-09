@@ -120,12 +120,18 @@ async def scout(
             why=f"registry series {hit.key}: {hit.title}",
         )
         return ScoutResult(need_id=need.id, specs=[spec], rejected=[], registry_hit=True)
-    remembered = deps.memory.lookup(need, today_nairobi())
+    remembered = [
+        s.model_copy(update={"need": need.id}) for s in deps.memory.lookup(need, today_nairobi())
+    ]
+    for spec in remembered:  # these urls are the memory's own: the allowlist knows them
+        if spec.url:
+            deps.memory_urls.update((spec.url, normalize_url(spec.url)))
+    stale: list[str] = []
     if remembered:
-        for spec in remembered:
-            if spec.url:
-                deps.memory_urls.update((spec.url, normalize_url(spec.url)))
-        return ScoutResult(need_id=need.id, specs=remembered, rejected=[], memory_hit=True)
+        # a remembered spec can have gone stale: its registry key disabled, its url unusable
+        remembered, stale = vet_specs(remembered, need, deps)
+        if remembered:
+            return ScoutResult(need_id=need.id, specs=remembered, rejected=stale, memory_hit=True)
     agent = build_scout(need)
     agent.instructions(lambda: scout_instructions(today_nairobi()))
     try:
@@ -146,7 +152,7 @@ async def scout(
     except EngineError as exc:  # usage limit, provider trouble: this need fails soft
         msg = deps.ctx.tracer.redact(exc.message)
         return ScoutResult(
-            need_id=need.id, specs=[], rejected=[f"scout failed: {msg}"], llm_used=True
+            need_id=need.id, specs=[], rejected=[*stale, f"scout failed: {msg}"], llm_used=True
         )
     specs, rejected = vet_specs(out.specs, need, deps)
-    return ScoutResult(need_id=need.id, specs=specs, rejected=rejected, llm_used=True)
+    return ScoutResult(need_id=need.id, specs=specs, rejected=stale + rejected, llm_used=True)
