@@ -15,6 +15,89 @@ the three stages of the Kenya Data Engine pipeline:
 - Practitioner canon: Tufte, Cairo, Knaflic, Datawrapper, Smart Brevity
 - Fact-checkers (Africa Check, PesaCheck), for the local proof of the same rules
 
+---
+
+## 0. Read this first: our context, not a newsroom's
+
+Everything below comes from major publishers. **We are not one**, and copying them wholesale would
+waste effort and miss our goal.
+
+**Who we are:** a founder plus AI agents, building **Jijenga** (a personal finance tracking app for
+Kenyans).
+
+**Why we publish:**
+- awareness and trust on **LinkedIn and X**;
+- a quiet lead magnet: people follow the voice, then find the app;
+- not page views, awards or accountability investigations.
+
+**Our resources:**
+- about 2 cents of LLM spend per research run;
+- one human reviewer;
+- minutes per piece, not weeks.
+
+**Our audience:** Kenyan professionals and money-conscious young adults scrolling on a phone. They
+want to know *what this means for my money*.
+
+**What success means for us:**
+1. **Never wrong.** One bad number costs more trust than ten good posts earn. Trust is the product
+   behind the product.
+2. **Consistently useful:** a recognisable series and voice people expect and save.
+3. **Fast enough to matter:** publish within 24–48 hours of a money moment (EPRA on the 14th, CPI at
+   month end, an MPC decision).
+4. **Cheap to produce:** about 15 minutes of human time per post, with the engine and agents doing
+   the rest.
+5. **It feeds the funnel without pitching.** Profile and series, then the newsletter or app. Never a
+   sales line inside the content.
+
+### What we adopt, adapt and skip
+
+| From the benchmarks | Decision | For us, it means |
+|---|---|---|
+| ProPublica bulletproofing | **Adapt (essential core only)** | Totals reconciled against the publisher's own figure, like-for-like comparisons, data vintage recorded, a second source for headline numbers. Code runs the checks automatically. No months of manual auditing. |
+| Pew methods reports | **Adapt (a one-line method note)** | A footer such as "Source: EPRA review 14 Oct 2026; Nairobi, super petrol; our calculation." Full detail lives in the dossier, not the post. |
+| Fact / inference / speculation | **Adopt fully** | Cheap to automate, and it is what keeps us from ever being wrong. |
+| One chart, one message, assertive headline | **Adopt fully** | Our whole format. |
+| FT Visual Vocabulary | **Adapt (a starter kit)** | We need about 5 chart types (line, sorted bar, waterfall or tax stack, before/after, simple map), not 70. |
+| Cairo's anti-misleading rules | **Adopt fully** | Part of the never-wrong rule, and checked by the design gate. |
+| The Pudding's custom visual essays | **Skip** | Weeks of bespoke work per piece. Wrong cost and wrong platform. |
+| Interactive graphics and scrollytelling | **Skip** | Not native to LinkedIn or X. Static images and carousels only. |
+| Large investigations (the Sigma Awards kind) | **Skip** | Not our job. We explain public data well. We don't do accountability reporting. |
+| House style (The Economist, BBC) | **Adapt (lightweight)** | One template set: a palette, 2 fonts, a footer, a logo-free or minimal brand mark. A consistent look builds recognition cheaply. |
+| Chartr and Visual Capitalist series | **Adopt and lean in** | Our closest models: social-first, a repeatable system, recurring formats. |
+| Smart Brevity structure | **Adopt** | Our default post skeleton. |
+| "Kill most ideas" (The Pudding) | **Adopt** | The engine surfaces about 5 topics per run. We publish the best 1–2, and only those with a verdict of `supported` or `reframed`. |
+
+### Right-sizing the pipeline
+
+- **Engine (Plan 2):** heavy on automated verification, because that's where trust comes from and
+  machines are cheap. The human doesn't redo research.
+- **Editorial agent:** drafts from the dossier, using templates and series formats. It has no web
+  access and can't add facts.
+- **Design agent:** fills chart templates from a chart spec. It doesn't design from scratch.
+- **The human (about 15 minutes):** checks the story verdict and the claims in a review checklist,
+  tweaks the voice, picks the image, and publishes.
+
+### Cadence target, to start
+
+- **3–5 posts a week across LinkedIn and X:** 2–3 series posts tied to the calendar, plus 1–2 on
+  topics surfaced by the radar.
+- **Measure:** saves, shares, substantive comments and follower growth from Kenyan professionals,
+  plus profile visits and app sign-ups attributed to the content.
+- **Adjust monthly.** Ignore vanity reach.
+
+### Our voice
+
+Kenyan, smart and direct: "the friend who reads the CBK report so you don't have to."
+- Use KSh, real worked examples (a 40-litre tank, a KSh 100k loan, a KSh 50k salary) and local
+  reference points.
+- No jargon without an instant translation.
+- Calm, never alarmist: we explain, we don't sensationalise.
+- Honest about what's unknown. That *is* the trust signal.
+
+Sections 1–7 below are the benchmark research. Read them through the decisions in this table.
+
+---
+
 > **Evidence caveat:** many of the sources below are secondary summaries or practitioner blogs. Platform
 > "algorithm" claims and engagement benchmarks are vendor-reported and conflict with one another. Treat
 > them as hypotheses to test with our own analytics, not as facts.
@@ -208,7 +291,7 @@ Series make the engine's calendar signals directly productive and train an audie
 
 ---
 
-## 7. Concrete changes this implies for Plan 2 (engine)
+## 7. Concrete changes this implies for Plan 2 (engine) — all automated; no extra human research time
 
 1. The Planner's `core_question` must be a reader question, and its `chart_concepts` carry the FT
    relationship type.
