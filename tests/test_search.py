@@ -71,7 +71,8 @@ async def test_all_fail_raises_search_error(respx_mock, ctx):
     fb = FallbackSearch([TavilyProvider("k", ctx.http), SerperProvider("k", ctx.http)], ctx.tracer)
     with pytest.raises(SearchError) as ei:
         await fb.search("q")
-    assert ei.value.message == "all search providers failed"
+    assert ei.value.message == "all search providers failed (tavily: boom; serper: 429)"
+    assert isinstance(ei.value.__cause__, httpx.HTTPStatusError)
     assert ei.value.hint == "check keys with engine doctor"
 
 
@@ -85,3 +86,19 @@ def test_build_search_keeps_only_providers_with_keys(ctx):
     ctx.secrets.serper_api_key = None
     fb = build_search(ctx)
     assert [p.name for p in fb.providers] == ["tavily"]
+
+
+async def test_search_error_reasons_are_redacted_and_cover_timeouts(respx_mock, ctx):
+    respx_mock.post(TAVILY).respond(401)
+    respx_mock.post(SERPER).mock(side_effect=httpx.ReadTimeout("slow fake-serper"))
+    fb = FallbackSearch([TavilyProvider("k", ctx.http), SerperProvider("k", ctx.http)], ctx.tracer)
+    with pytest.raises(SearchError) as ei:
+        await fb.search("q")
+    assert ei.value.message == "all search providers failed (tavily: 401; serper: timeout)"
+    assert "fake-serper" not in ei.value.message
+
+
+async def test_tavily_omits_include_domains_when_none(respx_mock, ctx):
+    route = respx_mock.post(TAVILY).respond(json={"results": []})
+    await TavilyProvider("k", ctx.http).search("q")
+    assert json.loads(route.calls.last.request.content) == {"query": "q", "max_results": 5}

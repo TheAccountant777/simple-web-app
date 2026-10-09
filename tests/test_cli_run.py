@@ -55,6 +55,9 @@ class FakeRadar:
         type(self).calls += 1
         return RADAR
 
+    def describe(self, output):
+        return f"{len(output.signals)} signals · {len(output.errors)} sources failed"
+
 
 class FakeSynth:
     name = "synthesize"
@@ -237,3 +240,28 @@ def test_stage_rejects_input_with_run(cli, fake_stages, tmp_home, tmp_path):
     f.write_text(RADAR.model_dump_json())
     r = cli.invoke(app, ["stage", "synthesize", "--input", str(f), "--run", handle.run_id])
     assert r.exit_code == 2 and "--input" in r.stdout and "--run" in r.stdout
+
+
+def test_run_json_prints_notes_as_warnings_on_stderr(cli, fake_stages):
+    r = cli.invoke(app, ["run", "--json"])
+    assert r.exit_code == 0, r.output
+    TopicList.model_validate_json(r.stdout)  # stdout stays pure JSON
+    assert "cbk" in r.stderr and "selector matched nothing" in r.stderr
+    assert "empty cluster [x]" in r.stderr
+
+
+def test_run_json_budget_notice_on_stderr(cli, monkeypatch):
+    class Exhausted(FakeSynth):
+        async def run(self, ctx, inp):
+            return TopicList(topics=[], budget_exhausted=True)
+
+    monkeypatch.setattr(
+        "kenya_data_engine.cli.run.build_stages", lambda: [FakeRadar(), Exhausted()]
+    )
+    r = cli.invoke(app, ["run", "--json"])
+    assert "Budget exhausted" in r.stderr and "Budget exhausted" not in r.stdout
+
+
+def test_progress_rows_show_stage_counts(cli, fake_stages):
+    r = cli.invoke(app, ["run"])
+    assert "1 signals · 1 sources failed" in r.output

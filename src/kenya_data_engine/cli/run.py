@@ -10,7 +10,7 @@ from rich.markup import escape
 from rich.panel import Panel
 
 from kenya_data_engine.cli.common import State, get_state, guarded
-from kenya_data_engine.cli.ui import console, run_footer, stage_progress, topics_table
+from kenya_data_engine.cli.ui import console, err_console, run_footer, stage_progress, topics_table
 from kenya_data_engine.config import load_secrets
 from kenya_data_engine.context import open_context
 from kenya_data_engine.errors import ConfigError
@@ -85,23 +85,24 @@ def run(
 
     topics, radar, footer = asyncio.run(go())
 
+    out = err_console if json_out else console  # keep stdout pure JSON under --json
     if json_out:
         typer.echo(topics.model_dump_json(indent=2))
-        return
-    console.print()
-    if topics.topics:
-        console.print(topics_table(topics))
     else:
-        console.print("[warn]No topics came out of this run.[/]")
+        console.print()
+        if topics.topics:
+            console.print(topics_table(topics))
+        else:
+            console.print("[warn]No topics came out of this run.[/]")
     if topics.budget_exhausted:
-        console.print(
+        out.print(
             "[warn]! Budget exhausted: some clusters were not scored. "
             "Raise budgets.run_usd in config.yaml to score them all.[/]"
         )
     for note in topics.dropped:
-        console.print(f"[warn]! dropped:[/] [muted]{escape(note)}[/]")
+        out.print(f"[warn]! dropped:[/] [muted]{escape(note)}[/]")
     if radar is not None:
         for err in radar.errors:
-            console.print(f"[warn]! source {err.adapter}:[/] [muted]{escape(err.message)}[/]")
-    if not state.quiet:
+            out.print(f"[warn]! source {err.adapter}:[/] [muted]{escape(err.message)}[/]")
+    if not state.quiet and not json_out:
         console.print(footer)

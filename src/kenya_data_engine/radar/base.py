@@ -89,6 +89,9 @@ class RadarStage:
     output_name = "signals"
     output_type = RadarResult
 
+    def describe(self, output: RadarResult) -> str:
+        return f"{len(output.signals)} signals · {len(output.errors)} sources failed"
+
     async def run(self, ctx: RunContext, inp: None) -> RadarResult:
         since = datetime.now(UTC) - timedelta(hours=ctx.config.radar.since_hours)
         return await run_radar(build_adapters(ctx.config, ctx.home), ctx, since)

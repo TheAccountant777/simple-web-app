@@ -74,3 +74,35 @@ async def test_calendar_malformed_file_raises_config_error(tmp_path, ctx, conten
     with pytest.raises(ConfigError) as ei:
         await CalendarAdapter(p, 21).fetch(ctx, T0)
     assert ei.value.hint
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        "{title: Bad, rule: weekly}",
+        "{title: Bad}",
+        "{title: Bad, rule: monthly}",
+        "{title: Bad, rule: monthly, day: 31}",
+        "{title: Bad, rule: monthly, day: soon}",
+        "{title: Bad, rule: annual, month: 13, day: 1}",
+        "{title: Bad, rule: annual, month: 2, day: 30}",
+        "{title: Bad, rule: annual, day: 1}",
+        "{title: Bad, rule: date, date: not-a-date}",
+        "{title: Bad, rule: date}",
+        "just a string",
+    ],
+)
+async def test_calendar_bad_entry_names_it(tmp_path, ctx, entry):
+    p = tmp_path / "c.yaml"
+    p.write_text("events:\n  - {title: Good, rule: monthly, day: 1}\n  - " + entry + "\n")
+    with pytest.raises(ConfigError) as ei:
+        await CalendarAdapter(p, 21).fetch(ctx, T0)
+    assert "Bad" in ei.value.message or "entry 2" in ei.value.message
+
+
+async def test_calendar_entry_without_title_is_an_error(tmp_path, ctx):
+    p = tmp_path / "c.yaml"
+    p.write_text("events:\n  - {rule: monthly, day: 1}\n")
+    with pytest.raises(ConfigError) as ei:
+        await CalendarAdapter(p, 21).fetch(ctx, T0)
+    assert "entry 1" in ei.value.message and "title" in ei.value.message

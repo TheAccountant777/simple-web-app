@@ -49,6 +49,50 @@ def occurrences(entry: dict[str, Any], start: date, end: date) -> list[date]:
     return sorted(d for d in found if start <= d <= end)
 
 
+def _invalid(label: str, problem: str) -> ConfigError:
+    return ConfigError(
+        f"calendar entry {label}: {problem}",
+        hint="see the packaged calendar.yaml for the format (`engine init --force`)",
+    )
+
+
+def _int_field(entry: dict[str, Any], key: str, label: str) -> int:
+    value = entry.get(key)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise _invalid(label, f"`{key}` must be a whole number")
+    return value
+
+
+def validate_entry(entry: object, index: int) -> dict[str, Any]:
+    """Check one calendar entry, raising a ConfigError that names it."""
+    if not isinstance(entry, dict):
+        raise _invalid(f"{index}", "must be a mapping with `title` and `rule`")
+    title = str(entry.get("title") or "").strip()
+    if not title:
+        raise _invalid(f"{index}", "missing `title`")
+    label = repr(title)
+    rule = entry.get("rule")
+    if rule == "monthly":
+        day = _int_field(entry, "day", label)
+        if day != -1 and not 1 <= day <= 28:
+            raise _invalid(label, "`day` must be 1-28 or -1 (last day)")
+    elif rule == "annual":
+        month = _int_field(entry, "month", label)
+        day = _int_field(entry, "day", label)
+        if _safe_date(2000, month, day) is None:  # 2000 is a leap year, so 29 Feb is allowed
+            raise _invalid(label, f"{month}/{day} is not a real month/day")
+    elif rule == "date":
+        raw = entry.get("date")
+        try:
+            if not isinstance(raw, date):
+                date.fromisoformat(str(raw))
+        except ValueError:
+            raise _invalid(label, "`date` must be an ISO date like 2026-12-01") from None
+    else:
+        raise _invalid(label, "`rule` must be monthly, annual or date")
+    return entry
+
+
 class CalendarAdapter:
     name = "calendar"
 
@@ -78,16 +122,14 @@ class CalendarAdapter:
                 f"{where} must contain an `events:` list",
                 hint="see the packaged calendar.yaml for the format (`engine init --force`)",
             )
-        return [e for e in events or [] if isinstance(e, dict)]
+        return [validate_entry(e, i) for i, e in enumerate(events or [], 1)]
 
     async def fetch(self, ctx: RunContext, since: datetime) -> list[Signal]:
         today = datetime.now(UTC).date()
         end = today + timedelta(days=self.lookahead_days)
         signals: list[Signal] = []
         for entry in self._entries():
-            name = str(entry.get("title", "")).strip()
-            if not name:
-                continue
+            name = str(entry["title"]).strip()
             for d in occurrences(entry, today, end):
                 title = f"{name} — {d:%d %b %Y}"
                 signals.append(

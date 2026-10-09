@@ -53,7 +53,9 @@ async def run_pipeline(
                     StageEvent(stage=stage.name, status="error", detail=ctx.tracer.redact(str(exc)))
                 )
                 raise
-            ctx.emit(StageEvent(stage=stage.name, status="done"))
+            describe = getattr(stage, "describe", None)
+            detail = describe(current) if callable(describe) else ""
+            ctx.emit(StageEvent(stage=stage.name, status="done", detail=detail))
     finally:
         _write_summary(ctx)
     assert isinstance(current, BaseModel)

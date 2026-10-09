@@ -105,3 +105,16 @@ async def test_adapter_error_message_is_redacted(ctx):
     res = await run_radar([LeakyAdapter()], ctx, since=T0)
     msg = res.errors[0].message
     assert "fake-tavily" not in msg and "fake-deepseek" not in msg and "***" in msg
+
+
+def test_radar_stage_describe():
+    from datetime import UTC, datetime
+
+    from kenya_data_engine.models import AdapterError, RadarResult
+
+    res = RadarResult(
+        signals=[],
+        errors=[AdapterError(adapter="a", message="m"), AdapterError(adapter="b", message="m")],
+        collected_at=datetime(2026, 10, 9, tzinfo=UTC),
+    )
+    assert RadarStage().describe(res) == "0 signals · 2 sources failed"

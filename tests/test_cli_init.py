@@ -146,3 +146,29 @@ def test_write_env_quotes_special_values_and_fixes_perms(tmp_path):
     write_env(p, {"B": 'has space"q', "C": "plain-1"})
     assert p.read_text().splitlines() == ["A=1", 'B="has space\\"q"', "C=plain-1"]
     assert oct(p.stat().st_mode & 0o777) == "0o600"
+
+
+def test_init_ignores_source_failures_for_exit_code(cli, monkeypatch, respx_mock):
+    from kenya_data_engine.cli import doctor as doctor_mod
+    from kenya_data_engine.cli.doctor import Check
+
+    monkeypatch.setattr(init_mod, "run_doctor", doctor_mod.run_doctor)  # undo the stub
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk")
+    respx_mock.get(MODELS).respond(200, json={})
+
+    async def fake(ctx):
+        return [
+            Check(name="DeepSeek key", group="keys", status="ok"),
+            Check(name="cbk", group="sources", status="fail", detail="down"),
+        ]
+
+    monkeypatch.setattr(doctor_mod, "run_checks", fake)
+    r = init(cli, "--non-interactive")
+    assert r.exit_code == 0, r.output
+    assert "the run continues without them" in r.stdout and "Next: engine run" in r.stdout
+
+    async def fake_fail(ctx):
+        return [Check(name="Web search", group="search", status="fail", detail="x")]
+
+    monkeypatch.setattr(doctor_mod, "run_checks", fake_fail)
+    assert init(cli, "--non-interactive").exit_code == 1

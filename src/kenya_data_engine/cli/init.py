@@ -198,7 +198,7 @@ def init(
         console.print("\n[muted]Skipped verification.[/] Next: [accent]engine doctor[/]")
         return
     console.print("\n[bold]Checking your setup…[/]")
-    code = run_doctor(state)
+    code = run_doctor(state, blocking=frozenset({"keys", "llm", "search"}))
     if code:
         console.print("\n[warn]Fix the failures above, then run `engine doctor` again.[/]")
         raise typer.Exit(code)

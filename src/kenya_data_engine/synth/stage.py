@@ -19,6 +19,9 @@ class SynthesizeStage:
     def __init__(self, model: Model | None = None) -> None:
         self.model = model
 
+    def describe(self, output: TopicList) -> str:
+        return f"{len(output.topics)} topics · {len(output.dropped)} dropped"
+
     async def run(self, ctx: RunContext, inp: RadarResult) -> TopicList:
         clusters, dropped = await cluster_signals(inp.signals, ctx, model=self.model)
         by_id = {s.id: s for s in inp.signals}
@@ -26,21 +29,24 @@ class SynthesizeStage:
         exhausted = False
         topics: list[Topic] = []
         failures: dict[int, str] = {}
+        unscored: dict[int, str] = {}
 
         async def one(i: int, cluster: Cluster) -> None:
             nonlocal exhausted
             async with sem:
                 if exhausted:
+                    unscored[i] = f"{cluster.title}: not scored (budget)"
                     return
                 try:
                     topics.append(await score_cluster(cluster, by_id, ctx, model=self.model))
                 except BudgetExceeded:
                     exhausted = True
+                    unscored[i] = f"{cluster.title}: not scored (budget)"
                 except Exception as exc:
                     failures[i] = f"{cluster.title}: scoring failed: {exc}"
 
         await asyncio.gather(*(one(i, c) for i, c in enumerate(clusters)))
-        dropped = dropped + [failures[i] for i in sorted(failures)]
+        dropped = dropped + [(failures | unscored)[i] for i in sorted(failures | unscored)]
         return TopicList(
             topics=rank_topics(topics, ctx.config.top_n),
             dropped=dropped,

@@ -37,9 +37,12 @@ class TavilyProvider:
     async def search(
         self, query: str, n: int = 5, domains: list[str] | None = None
     ) -> list[SearchResult]:
+        body: dict[str, object] = {"query": query, "max_results": n}
+        if domains:
+            body["include_domains"] = domains
         resp = await self._client.post(
             "https://api.tavily.com/search",
-            json={"query": query, "max_results": n, "include_domains": domains},
+            json=body,
             headers={"Authorization": f"Bearer {self._key}"},
             timeout=TIMEOUT_S,
         )
@@ -86,13 +89,26 @@ class FallbackSearch:
     async def search(
         self, query: str, n: int = 5, domains: list[str] | None = None
     ) -> list[SearchResult]:
+        reasons: list[str] = []
+        last: Exception | None = None
         for provider in self.providers:
             try:
                 async with self._tracer.span("tools", "tool", f"search.{provider.name}"):
                     return await provider.search(query, n, domains)
-            except Exception:  # any failure moves on to the next provider
-                continue
-        raise SearchError("all search providers failed", hint="check keys with engine doctor")
+            except Exception as exc:  # any failure moves on to the next provider
+                last = exc
+                reasons.append(f"{provider.name}: {self._reason(exc)}")
+        raise SearchError(
+            f"all search providers failed ({'; '.join(reasons)})",
+            hint="check keys with engine doctor",
+        ) from last
+
+    def _reason(self, exc: Exception) -> str:
+        if isinstance(exc, httpx.HTTPStatusError):
+            return str(exc.response.status_code)
+        if isinstance(exc, httpx.TimeoutException):
+            return "timeout"
+        return self._tracer.redact(str(exc) or type(exc).__name__)
 
 
 def build_search(ctx: RunContext) -> FallbackSearch:

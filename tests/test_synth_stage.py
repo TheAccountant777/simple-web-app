@@ -78,6 +78,7 @@ async def test_budget_exhaustion_keeps_partial(ctx):
     res = await SynthesizeStage(model=stage_model(5, scorer)).run(ctx, radar(5))
     assert len(res.topics) == 2 and res.budget_exhausted
     assert len(calls) == 2
+    assert res.dropped == [f"C{i}: not scored (budget)" for i in (2, 3, 4)]
 
 
 async def test_scoring_failure_recorded_in_dropped(ctx):
@@ -114,3 +115,10 @@ async def test_cluster_drops_carried_into_topic_list(ctx):
 
     res = await SynthesizeStage(model=function_model_returning(out)).run(ctx, radar(1))
     assert res.topics == [] and res.dropped == ["Ghost: no valid signals"]
+
+
+def test_describe_counts():
+    from kenya_data_engine.models import TopicList
+
+    out = TopicList(topics=[], dropped=["a", "b"])
+    assert SynthesizeStage().describe(out) == "0 topics · 2 dropped"

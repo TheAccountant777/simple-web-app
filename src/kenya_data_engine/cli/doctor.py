@@ -16,12 +16,13 @@ from rich.text import Text
 from kenya_data_engine.cli.common import State, get_state, guarded
 from kenya_data_engine.cli.ui import badge, console, err_console
 from kenya_data_engine.context import RunContext, open_context
+from kenya_data_engine.errors import ConfigError
 from kenya_data_engine.radar.base import build_adapters
 from kenya_data_engine.runs import RunHandle
 from kenya_data_engine.tools.search import build_search
 
 Group = Literal["keys", "llm", "search", "sources"]
-Status = Literal["ok", "warn", "fail"]
+Status = Literal["ok", "warn", "fail", "skip"]
 
 GROUP_TITLES: dict[str, str] = {
     "keys": "API keys",
@@ -100,7 +101,7 @@ async def _timed(
 async def _llm_probe(ctx: RunContext) -> tuple[Status, str]:
     key = ctx.secrets.deepseek_api_key
     if key is None:
-        return "fail", "skipped: no DeepSeek key"
+        return "skip", "no DeepSeek key"
     base = ctx.config.llm.base_url.rstrip("/")
     resp = await ctx.http.get(
         f"{base}/models",
@@ -123,7 +124,11 @@ async def _llm_probe(ctx: RunContext) -> tuple[Status, str]:
 
 
 async def _search_probe(ctx: RunContext) -> tuple[Status, str]:
-    results = await build_search(ctx).search("Kenya inflation", n=1)
+    try:
+        search = build_search(ctx)
+    except ConfigError:
+        return "skip", "no search key"
+    results = await search.search("Kenya inflation", n=1)
     if not results:
         return "warn", "search worked but returned no results"
     return "ok", f"{len(results)} result: {results[0].title[:50]}"
@@ -173,13 +178,15 @@ def checks_table(checks: list[Check]) -> Table:
 
 
 def summary_line(checks: list[Check]) -> Text:
-    n = {s: sum(c.status == s for c in checks) for s in ("ok", "warn", "fail")}
+    n = {s: sum(c.status == s for c in checks) for s in ("ok", "warn", "fail", "skip")}
     line = Text()
     line.append(f"{n['ok']} ok", style="ok")
     line.append(" · ", style="muted")
     line.append(f"{n['warn']} warn", style="warn" if n["warn"] else "muted")
     line.append(" · ", style="muted")
     line.append(f"{n['fail']} fail", style="fail" if n["fail"] else "muted")
+    line.append(" · ", style="muted")
+    line.append(f"{n['skip']} skipped", style="muted")
     return line
 
 
@@ -191,8 +198,14 @@ async def _collect(state: State) -> list[Check]:
             return await run_checks(ctx)
 
 
-def run_doctor(state: State, *, json_out: bool = False) -> int:
-    """Run and print the checks; return the process exit code (1 if any check failed)."""
+def run_doctor(
+    state: State, *, json_out: bool = False, blocking: frozenset[str] | None = None
+) -> int:
+    """Run and print the checks; return the exit code (1 if a check in `blocking` failed).
+
+    `blocking` is the set of groups whose failures count (default: all of them). Failures
+    in other groups are shown as a note that the run continues without them.
+    """
     if json_out or state.quiet:
         checks = asyncio.run(_collect(state))
     else:
@@ -205,7 +218,14 @@ def run_doctor(state: State, *, json_out: bool = False) -> int:
         console.print(checks_table(checks))
         console.print()
         console.print(summary_line(checks))
-    return 1 if any(c.status == "fail" for c in checks) else 0
+    failed = [c for c in checks if c.status == "fail"]
+    if blocking is not None:
+        soft = [c for c in failed if c.group not in blocking]
+        if soft and not json_out:
+            names = ", ".join(c.name for c in soft)
+            console.print(f"[muted]Note: failing: {names}; the run continues without them.[/]")
+        failed = [c for c in failed if c.group in blocking]
+    return 1 if failed else 0
 
 
 @guarded

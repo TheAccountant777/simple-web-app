@@ -141,3 +141,13 @@ async def test_stage_error_detail_is_redacted(ctx, events):
     with pytest.raises(RuntimeError):
         await run_pipeline([A(), Leaky()], ctx)
     assert "fake-deepseek" not in events[-1].detail and "***" in events[-1].detail
+
+
+async def test_done_event_carries_stage_description(ctx, events):
+    class Described(A):
+        def describe(self, output):
+            return f"n={output.n}"
+
+    await run_pipeline([Described(), B()], ctx)
+    done = {e.stage: e.detail for e in events if e.status == "done"}
+    assert done == {"a": "n=2", "b": ""}

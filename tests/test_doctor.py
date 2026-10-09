@@ -49,8 +49,8 @@ async def test_doctor_missing_deepseek_key_fails(respx_mock, ctx_no_keys):
         checks["DeepSeek key"].status == "fail" and "engine init" in checks["DeepSeek key"].detail
     )
     assert checks["Search key"].status == "fail"
-    assert checks["DeepSeek /models"].status == "fail"
-    assert checks["Web search"].status == "fail"
+    assert checks["DeepSeek /models"].status == "skip"
+    assert checks["Web search"].status == "skip"
 
 
 async def test_doctor_single_search_key_warns(respx_mock, ctx):
@@ -116,6 +116,7 @@ def test_render_table_and_summary():
         Check(name="DeepSeek key", group="keys", status="ok", detail="set"),
         Check(name="nation", group="sources", status="warn", latency_ms=12, detail="0 signals"),
         Check(name="cbk", group="sources", status="fail", latency_ms=3, detail="down"),
+        Check(name="Web search", group="search", status="skip", detail="no key"),
     ]
     from rich.console import Console
 
@@ -126,7 +127,7 @@ def test_render_table_and_summary():
     c.print(summary_line(checks))
     out = c.export_text()
     assert "API keys" in out and "Radar sources" in out and "12 ms" in out
-    assert "1 ok · 1 warn · 1 fail" in out
+    assert "1 ok · 1 warn · 1 fail · 1 skipped" in out
 
 
 @pytest.fixture
@@ -159,3 +160,11 @@ def test_doctor_leaves_no_run_behind(cli_no_keys, monkeypatch, tmp_home):
     monkeypatch.setattr(doctor_mod, "run_checks", fake)
     cli_no_keys.invoke(app, ["doctor"])
     assert list(tmp_home.runs_dir.iterdir()) == []
+
+
+def test_doctor_exit_code_ignores_skips(cli_no_keys, monkeypatch):
+    async def fake(ctx):
+        return [Check(name="x", group="llm", status="skip", detail="no key")]
+
+    monkeypatch.setattr(doctor_mod, "run_checks", fake)
+    assert cli_no_keys.invoke(app, ["doctor"]).exit_code == 0
