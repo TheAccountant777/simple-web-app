@@ -11,7 +11,6 @@ from kenya_data_engine.cli.common import make_state
 
 app = typer.Typer(
     name="engine",
-    help="Kenya Data Engine: find and rank Kenyan data-journalism topics.",
     epilog="Start with `engine init`, check with `engine doctor`, then `engine run`.",
     no_args_is_help=True,
     rich_markup_mode="rich",
@@ -45,8 +44,9 @@ def main(
         typer.Option("--version", callback=_version_callback, is_eager=True, help="Show version."),
     ] = False,
 ) -> None:
-    """Collect Kenyan signals (news, data releases, policy, trends, calendar), cluster and
-    score them with DeepSeek, and print a ranked topic list.
+    """Kenya Data Engine: find and rank Kenyan data-journalism topics.
+
+    Collects Kenyan signals, scores topics with DeepSeek, prints a ranked list.
 
     \b
     Examples:

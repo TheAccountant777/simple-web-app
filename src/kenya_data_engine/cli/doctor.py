@@ -135,7 +135,7 @@ def _source_probe(ctx: RunContext, adapter: object) -> Callable[[], Awaitable[tu
         signals = await adapter.fetch(ctx, since)  # type: ignore[attr-defined]
         if not signals:
             return "warn", "0 signals in the last 30 days (feed empty or selectors stale?)"
-        return "ok", f"{len(signals)} signals"
+        return "ok", f"{len(signals)} signal{'' if len(signals) == 1 else 's'}"
 
     return probe
 

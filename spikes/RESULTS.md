@@ -34,3 +34,7 @@ base URL stays configurable. Stage `max_tokens` and `extra_body` pass through `M
 Tests use `pydantic_ai.models.function.FunctionModel`; the structured output is returned as a
 tool call to `info.output_tools[0]`. Live behaviour (reasoning/`extra_body` flags, tool-call
 output with deepseek-flash) is unverified until a key is available.
+
+## First live run
+
+pending — run on a machine with keys: engine init → engine doctor → engine run
