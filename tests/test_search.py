@@ -26,6 +26,7 @@ async def test_tavily_maps_results(respx_mock, ctx):
     assert json.loads(req.content) == {
         "query": "cbk rate",
         "max_results": 3,
+        "search_depth": "basic",
         "include_domains": ["cbk.go.ke"],
     }
 
@@ -101,4 +102,60 @@ async def test_search_error_reasons_are_redacted_and_cover_timeouts(respx_mock, 
 async def test_tavily_omits_include_domains_when_none(respx_mock, ctx):
     route = respx_mock.post(TAVILY).respond(json={"results": []})
     await TavilyProvider("k", ctx.http).search("q")
-    assert json.loads(route.calls.last.request.content) == {"query": "q", "max_results": 5}
+    assert json.loads(route.calls.last.request.content) == {
+        "query": "q",
+        "max_results": 5,
+        "search_depth": "basic",
+    }
+
+
+def _ledger(ctx):
+    from kenya_data_engine.research.budget import Ledger
+
+    return Ledger.from_config(ctx.config.research)
+
+
+async def test_search_charges_credits_and_records_usage(respx_mock, ctx):
+    from kenya_data_engine.tools.search import SearchUsage
+
+    route = respx_mock.post(TAVILY).respond(json={"results": []})
+    ledger = _ledger(ctx)
+    usage = SearchUsage(ctx.home.db_path)
+    fb = FallbackSearch([TavilyProvider("k", ctx.http)], ctx.tracer, ledger=ledger, usage=usage)
+    await fb.search("q", depth="advanced")
+    assert json.loads(route.calls[0].request.content)["search_depth"] == "advanced"
+    assert ledger.snapshot().groups["scouts"].credits_spent == 2
+    assert usage.month_total("tavily") == 2
+    assert usage.month_total("serper") == 0
+
+
+async def test_search_refuses_without_credits(respx_mock, ctx):
+    from kenya_data_engine.errors import BudgetExceeded
+
+    route = respx_mock.post(TAVILY).respond(json={"results": []})
+    ledger = _ledger(ctx)
+    ledger.charge_credits("scouts", 17)
+    fb = FallbackSearch([TavilyProvider("k", ctx.http)], ctx.tracer, ledger=ledger)
+    with pytest.raises(BudgetExceeded):
+        await fb.search("q")
+    assert not route.called
+
+
+async def test_search_monthly_limit_skips_provider(respx_mock, ctx):
+    from kenya_data_engine.tools.search import SearchUsage
+
+    t = respx_mock.post(TAVILY).respond(json={"results": []})
+    respx_mock.post(SERPER).respond(json={"organic": []})
+    usage = SearchUsage(ctx.home.db_path)
+    usage.add("tavily", 5)
+    fb = FallbackSearch(
+        [TavilyProvider("k", ctx.http), SerperProvider("k", ctx.http)],
+        ctx.tracer, usage=usage, monthly_limit=5,
+    )  # fmt: skip
+    assert await fb.search("q") == []
+    assert not t.called and usage.month_total("serper") == 1
+
+
+def test_build_search_with_ledger_wires_usage(ctx):
+    fb = build_search(ctx, ledger=_ledger(ctx), group="claims")
+    assert fb._group == "claims" and fb._usage is not None and fb._monthly_limit == 1000

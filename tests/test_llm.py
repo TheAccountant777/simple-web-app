@@ -182,3 +182,103 @@ async def test_run_agent_unmapped_status_passes_through(ctx):
             Agent(output_type=Out), "p", ctx, stage="synthesize_cluster", name="n",
             model=_raising(ModelHTTPError(404, "m")),
         )  # fmt: skip
+
+
+class Box(BaseModel):
+    value: str
+
+
+async def test_run_agent_with_deps_and_tools(ctx):
+    from pydantic_ai import RunContext as AiCtx
+    from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart, ToolReturnPart
+
+    agent = Agent(deps_type=Box, output_type=Out)
+
+    @agent.tool
+    def read_box(c: AiCtx[Box]) -> str:
+        return c.deps.value
+
+    def fn(messages, info):
+        for m in messages:
+            for p in getattr(m, "parts", []):
+                if isinstance(p, ToolReturnPart):
+                    return ModelResponse(
+                        parts=[ToolCallPart(info.output_tools[0].name, {"answer": p.content})]
+                    )
+        return ModelResponse(parts=[ToolCallPart("read_box", {})])
+
+    assert TextPart  # keep import used
+    out = await run_agent(
+        agent, "go", ctx, stage="synthesize_cluster", name="t",
+        model=FunctionModel(fn), deps=Box(value="from-deps"),
+    )  # fmt: skip
+    assert out.answer == "from-deps"
+
+
+async def test_run_agent_usage_limit_maps_to_engine_error(ctx):
+    from pydantic_ai.messages import ModelResponse, ToolCallPart
+    from pydantic_ai.usage import UsageLimits
+
+    agent = Agent(output_type=Out)
+
+    @agent.tool_plain
+    def ping() -> str:
+        return "pong"
+
+    def fn(messages, info):
+        return ModelResponse(parts=[ToolCallPart("ping", {})])
+
+    with pytest.raises(EngineError) as ei:
+        await run_agent(
+            agent, "go", ctx, stage="synthesize_cluster", name="loop",
+            model=FunctionModel(fn), usage_limits=UsageLimits(request_limit=1),
+        )  # fmt: skip
+    assert "limit" in ei.value.message and "loop" in ei.value.message
+
+
+def _ledger(ctx):
+    from kenya_data_engine.research.budget import Ledger
+
+    return Ledger.from_config(ctx.config.research)
+
+
+async def test_ledger_model_reserves_and_settles(ctx):
+    ledger = _ledger(ctx)
+    await run_agent(
+        Agent(output_type=Out), "hello", ctx, stage="synthesize_cluster", name="t",
+        model=function_model_returning(Out(answer="x")), ledger=ledger, group="planner",
+    )  # fmt: skip
+    g = ledger.snapshot().groups["planner"]
+    assert g.usd_spent > 0 and g.usd_reserved == 0
+
+
+async def test_ledger_model_refuses_when_exhausted(ctx):
+    ledger = _ledger(ctx)
+    ledger.settle(ledger.reserve("planner", 0.0225), 0.0225)
+    calls = []
+
+    def fn(messages, info):
+        calls.append(1)
+        raise AssertionError
+
+    with pytest.raises(BudgetExceeded):
+        await run_agent(
+            Agent(output_type=Out), "hello", ctx, stage="synthesize_cluster", name="t",
+            model=FunctionModel(fn), ledger=ledger, group="planner",
+        )  # fmt: skip
+    assert calls == []
+
+
+async def test_ledger_model_settles_zero_on_failure(ctx):
+    ledger = _ledger(ctx)
+
+    def boom(_):
+        raise RuntimeError("boom")
+
+    with pytest.raises(RuntimeError):
+        await run_agent(
+            Agent(output_type=Out), "hello", ctx, stage="synthesize_cluster", name="t",
+            model=function_model_returning(boom), ledger=ledger, group="planner",
+        )  # fmt: skip
+    g = ledger.snapshot().groups["planner"]
+    assert g.usd_spent == 0 and g.usd_reserved == 0

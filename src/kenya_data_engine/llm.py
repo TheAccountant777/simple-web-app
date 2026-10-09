@@ -3,22 +3,31 @@
 import contextlib
 import json
 import logging
+import math
 import time
 from importlib import resources
-from typing import Any
+from typing import Any, cast
 
 from pydantic import BaseModel, TypeAdapter
 from pydantic_ai import Agent
-from pydantic_ai.exceptions import ModelAPIError, ModelHTTPError, UnexpectedModelBehavior
-from pydantic_ai.messages import ModelMessage
-from pydantic_ai.models import Model
+from pydantic_ai.exceptions import (
+    ModelAPIError,
+    ModelHTTPError,
+    UnexpectedModelBehavior,
+    UsageLimitExceeded,
+)
+from pydantic_ai.messages import ModelMessage, ModelRequest, ModelResponse
+from pydantic_ai.models import Model, ModelRequestParameters
 from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.models.wrapper import WrapperModel
 from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.settings import ModelSettings
-from pydantic_ai.usage import RunUsage
+from pydantic_ai.usage import RunUsage, UsageLimits
 
 from kenya_data_engine.context import RunContext
 from kenya_data_engine.errors import ConfigError, EngineError
+from kenya_data_engine.research.budget import Ledger
+from kenya_data_engine.trace import Tracer
 
 log = logging.getLogger(__name__)
 
@@ -106,8 +115,59 @@ def _write_capture(ctx: RunContext, payload: dict[str, Any], stage: str, name: s
     return filename
 
 
-async def run_agent[T](
-    agent: Agent[None, T],
+def _chars(messages: list[ModelMessage]) -> int:
+    """Rough size of a request in characters, for the pre-call cost estimate."""
+    total = 0
+    for m in messages:
+        for part in m.parts:
+            content = getattr(part, "content", None)
+            if content is None:
+                content = getattr(part, "args", "")
+            total += len(content if isinstance(content, str) else str(content))
+            total += len(getattr(part, "tool_name", ""))
+        if isinstance(m, ModelRequest) and m.instructions:
+            total += len(m.instructions)
+    return total
+
+
+class LedgerModel(WrapperModel):
+    """Wrap a model so every request reserves budget first and settles on the real usage."""
+
+    def __init__(
+        self, wrapped: Model, ledger: Ledger, group: str, tracer: Tracer, max_tokens: int
+    ) -> None:
+        super().__init__(wrapped)
+        self.ledger = ledger
+        self.group = group
+        self.tracer = tracer
+        self.max_tokens = max_tokens
+
+    async def request(
+        self,
+        messages: list[ModelMessage],
+        model_settings: ModelSettings | None,
+        model_request_parameters: ModelRequestParameters,
+    ) -> ModelResponse:
+        self.tracer.check_budget()
+        estimate = self.tracer.cost_of(math.ceil(_chars(messages) / 3), self.max_tokens)
+        reservation = self.ledger.reserve(self.group, estimate)
+        try:
+            response = await self.wrapped.request(
+                messages, model_settings, model_request_parameters
+            )
+        except BaseException:
+            self.ledger.settle(reservation, 0.0)
+            raise
+        u = response.usage
+        self.ledger.settle(
+            reservation,
+            self.tracer.cost_of(u.input_tokens, u.output_tokens, u.cache_read_tokens),
+        )
+        return response
+
+
+async def run_agent[D, T](
+    agent: Agent[D, T],
     prompt: str,
     ctx: RunContext,
     *,
@@ -115,11 +175,23 @@ async def run_agent[T](
     name: str,
     topic_id: str | None = None,
     model: Model | None = None,
+    deps: D | None = None,
+    usage_limits: UsageLimits | None = None,
+    ledger: Ledger | None = None,
+    group: str | None = None,
 ) -> T:
-    """Run an agent, tracing tokens and cost. `model` is the test seam."""
+    """Run an agent, tracing tokens and cost. `model` is the test seam.
+
+    With a `ledger`, every model request reserves and settles budget in `group` (default: the
+    stage name). `usage_limits` caps requests and tool calls inside the run.
+    """
     ctx.tracer.check_budget()
     use_model = model if model is not None else build_model(ctx, stage)
     settings = stage_settings(ctx, stage)
+    if ledger is not None:
+        use_model = LedgerModel(
+            use_model, ledger, group or stage, ctx.tracer, settings.get("max_tokens", 0)
+        )
     usage = RunUsage()
     start = time.perf_counter()
 
@@ -182,10 +254,20 @@ async def run_agent[T](
 
     try:
         run_result: Any = await agent.run(
-            prompt, model=use_model, model_settings=settings, usage=usage
+            prompt,
+            model=use_model,
+            model_settings=settings,
+            usage=usage,
+            deps=cast("D", deps),  # None only for agents without deps
+            usage_limits=usage_limits,
         )
     except BaseException as exc:
         record("error", str(exc) or type(exc).__name__)
+        if isinstance(exc, UsageLimitExceeded):
+            raise EngineError(
+                f"agent {name!r} hit its usage limit: {exc}",
+                hint="the agent used more model requests or tool calls than allowed",
+            ) from exc
         friendly = _friendly(exc)
         if friendly is not None:
             raise friendly from exc
