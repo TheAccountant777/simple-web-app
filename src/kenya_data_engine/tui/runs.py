@@ -145,9 +145,6 @@ def topic_text(topic: Topic, rank: int, weights: dict[str, float] | None, scrub:
         else:
             t.append(f" × {weight:.2f}  = ", style=MUTED)
             t.append(f"{score * weight:.3f}\n")
-        why = topic.scores.justification.get(key)
-        if why:
-            t.append(f"  {scrub(why)}\n", style=MUTED)
     t.append("─" * 37 + "\n", style=MUTED)
     if weights is None:
         t.append("⚠ config weights unavailable; cannot re-add the score\n", style=WARN)
@@ -162,6 +159,13 @@ def topic_text(topic: Topic, rank: int, weights: dict[str, float] | None, scrub:
                 f"\n⚠ weights changed since run: stored final_score is {topic.final_score:.3f}\n",
                 style=WARN,
             )
+    reasons = [(k, topic.scores.justification.get(k)) for k in CRITERIA]
+    if any(why for _, why in reasons):
+        t.append("\nJUSTIFICATION\n", style=f"bold {ACCENT}")
+        for key, why in reasons:
+            if why:
+                t.append(f"{key}: ", style=INK)
+                t.append(f"{scrub(why)}\n", style=MUTED)
     t.append("\nWHY NOW\n", style=f"bold {ACCENT}")
     t.append(scrub(topic.why_now) + "\n")
     return t
