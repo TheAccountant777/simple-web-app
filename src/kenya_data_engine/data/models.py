@@ -2,10 +2,11 @@
 
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import BaseModel
 
-from kenya_data_engine.data.periods import Period
+from kenya_data_engine.data.periods import Period, PeriodType
 
 
 class Provenance(BaseModel):
@@ -30,3 +31,25 @@ class Observation(BaseModel):
 class StoredObservation(Observation):
     vintage: int
     revised: bool  # a different value exists in an earlier vintage
+
+
+class SeriesSpec(BaseModel):
+    """Declared per registry series; drives the table checks."""
+
+    key: str
+    metric: str
+    unit: str
+    period_type: PeriodType
+    entities: list[str] = []  # expected entities (e.g. towns); empty = any
+    min_value: Decimal | None = None
+    max_value: Decimal | None = None
+    max_step_pct: Decimal | None = None  # continuity: |change| vs latest stored value
+    totals: list[tuple[str, list[str]]] = []  # (total entity, component entities)
+    total_tolerance: Decimal = Decimal("0.5")
+
+
+class CheckReport(BaseModel):
+    status: Literal["accepted", "quarantined"]
+    failures: list[str]
+    warnings: list[str]
+    checked: int
