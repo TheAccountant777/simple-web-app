@@ -29,14 +29,22 @@ def _entry_date(entry: Any) -> datetime | None:
 
 
 class RssAdapter:
-    def __init__(self, name: str, url: str, kind: SignalKind = "news") -> None:
+    def __init__(
+        self, name: str, url: str, kind: SignalKind = "news", user_agent: str | None = None
+    ) -> None:
         self.name = name
         self.url = url
+        self.user_agent = user_agent
         self.kind: SignalKind = kind
 
     async def fetch(self, ctx: RunContext, since: datetime) -> list[Signal]:
         res = await fetch(
-            self.url, client=ctx.http, cache=ctx.cache, ttl_hours=ctx.config.cache_ttl_hours
+            self.url,
+            client=ctx.http,
+            cache=ctx.cache,
+            ttl_hours=ctx.config.cache_ttl_hours,
+            headers={"User-Agent": self.user_agent} if self.user_agent else None,
+            aia=ctx.tls,
         )
         feed = feedparser.parse(res.content)
         signals: list[Signal] = []

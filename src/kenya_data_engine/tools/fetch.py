@@ -33,7 +33,7 @@ async def fetch_page(url: str, ctx: RunContext) -> PageText:
     async with ctx.tracer.span("tools", "tool", "fetch_page"):
         text, title = "", None
         try:
-            res = await fetch(url, client=ctx.http, cache=ctx.cache, ttl_hours=ttl)
+            res = await fetch(url, client=ctx.http, cache=ctx.cache, ttl_hours=ttl, aia=ctx.tls)
             text, title = _extract(res.content.decode("utf-8", errors="replace"))
         except FetchError:
             pass  # fall through to the reader proxy

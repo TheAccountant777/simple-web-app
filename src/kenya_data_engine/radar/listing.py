@@ -27,13 +27,19 @@ class ListingAdapter:
             raise ConfigError(f"{name}: a listing source needs item, title and link selectors")
         self.name = name
         self.spec = spec
+        self.user_agent = spec.user_agent
         self.item, self.title_sel, self.link_sel = spec.item, spec.title, spec.link
         self.max_items = max_items
 
     async def fetch(self, ctx: RunContext, since: datetime) -> list[Signal]:
         spec = self.spec
         res = await fetch(
-            spec.url, client=ctx.http, cache=ctx.cache, ttl_hours=ctx.config.cache_ttl_hours
+            spec.url,
+            client=ctx.http,
+            cache=ctx.cache,
+            ttl_hours=ctx.config.cache_ttl_hours,
+            headers={"User-Agent": spec.user_agent} if spec.user_agent else None,
+            aia=ctx.tls,
         )
         tree = LexborHTMLParser(res.content.decode("utf-8", errors="replace"))
         # A union like `a tr, tr` returns a node once per branch that matches it.

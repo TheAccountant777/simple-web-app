@@ -12,6 +12,7 @@ from kenya_data_engine.cache import Cache
 from kenya_data_engine.config import EngineConfig, Secrets, load_config, load_secrets
 from kenya_data_engine.home import EngineHome
 from kenya_data_engine.runs import RunHandle
+from kenya_data_engine.tls import AiaFixer
 from kenya_data_engine.trace import Tracer
 
 
@@ -34,6 +35,7 @@ class RunContext:
     tracer: Tracer
     cache: Cache
     http: httpx.AsyncClient
+    tls: AiaFixer
     emit: Callable[[StageEvent], None] = field(default=_no_emit)
 
 
@@ -62,14 +64,19 @@ async def open_context(
             if v is not None
         ],
     )
-    async with httpx.AsyncClient() as client:
-        yield RunContext(
-            home=home,
-            config=config,
-            secrets=secrets,
-            run=run,
-            tracer=tracer,
-            cache=Cache(home.db_path),
-            http=client,
-            emit=emit or _no_emit,
-        )
+    fixer = AiaFixer(home.certs_dir)
+    try:
+        async with httpx.AsyncClient() as client:
+            yield RunContext(
+                home=home,
+                config=config,
+                secrets=secrets,
+                run=run,
+                tracer=tracer,
+                cache=Cache(home.db_path),
+                http=client,
+                tls=fixer,
+                emit=emit or _no_emit,
+            )
+    finally:
+        await fixer.aclose()

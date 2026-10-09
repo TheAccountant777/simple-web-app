@@ -71,3 +71,9 @@ async def test_timeout_adapter_reported(respx_mock, ctx):
     assert route.call_count == 3
     res = await run_radar([RssAdapter("x", URL)], ctx, T0)
     assert res.signals == [] and [e.adapter for e in res.errors] == ["x"]
+
+
+async def test_rss_uses_per_source_user_agent(respx_mock, ctx):
+    route = respx_mock.get(URL).respond(200, content=b"<rss version='2.0'><channel/></rss>")
+    await RssAdapter("x", URL, user_agent="python:custom/1").fetch(ctx, T0)
+    assert route.calls.last.request.headers["user-agent"] == "python:custom/1"

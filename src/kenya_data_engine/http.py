@@ -16,9 +16,19 @@ from kenya_data_engine import __version__
 from kenya_data_engine.cache import Cache
 from kenya_data_engine.errors import FetchError
 from kenya_data_engine.models import normalize_url
+from kenya_data_engine.tls import AiaFixer, is_incomplete_chain
 
 TIMEOUT_S = 20.0
-USER_AGENT = f"kenya-data-engine/{__version__} (+research)"
+# Browser-like: some Kenyan WAFs (CBK, KRA) reject obviously non-browser agents.
+USER_AGENT = (
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
+    f"Chrome/124.0 Safari/537.36 kenya-data-engine/{__version__}"
+)
+DEFAULT_HEADERS = {
+    "User-Agent": USER_AGENT,
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+}
+CHAIN_HINT = "this server sends an incomplete certificate chain"
 # 0.5 s, 1 s, 2 s plus jitter; tests replace this with wait_none().
 _WAIT: Any = wait_exponential(multiplier=0.5, exp_base=2) + wait_random(0, 0.25)
 
@@ -37,11 +47,35 @@ class _ServerError(Exception):
         self.status = status
 
 
+class _ChainError(Exception):
+    """The server omitted its intermediate certificate; retrying as-is cannot help."""
+
+
 async def _get(client: httpx.AsyncClient, url: str, headers: dict[str, str]) -> httpx.Response:
-    resp = await client.get(url, headers=headers, timeout=TIMEOUT_S, follow_redirects=True)
+    try:
+        resp = await client.get(url, headers=headers, timeout=TIMEOUT_S, follow_redirects=True)
+    except httpx.ConnectError as exc:
+        if is_incomplete_chain(exc):
+            raise _ChainError(str(exc)) from exc
+        raise
     if resp.status_code >= 500:
         raise _ServerError(resp.status_code)
     return resp
+
+
+async def _retry_with_intermediate(
+    url: str, send: dict[str, str], aia: AiaFixer | None, original: str
+) -> httpx.Response:
+    """One retry with the missing intermediate added to the trust store; else FetchError."""
+    failure = f"transport error for {url}: {original}"
+    if aia is None:
+        raise FetchError(failure, hint=CHAIN_HINT)
+    try:
+        return await _get(await aia.client_for(url), url, send)
+    except Exception as exc:  # any repair failure: surface the original problem
+        raise FetchError(
+            failure, hint=f"{CHAIN_HINT}; fetching the missing certificate failed ({exc})"
+        ) from exc
 
 
 async def fetch(
@@ -51,6 +85,7 @@ async def fetch(
     cache: Cache,
     ttl_hours: float,
     headers: dict[str, str] | None = None,
+    aia: AiaFixer | None = None,
 ) -> FetchResult:
     key = normalize_url(url)
     hit = cache.get(key)
@@ -58,7 +93,7 @@ async def fetch(
         return FetchResult(
             url=url, status=200, content=hit.content, content_type=hit.content_type, from_cache=True
         )
-    send = {"User-Agent": USER_AGENT, **(headers or {})}
+    send = {**DEFAULT_HEADERS, **(headers or {})}
     try:
         async for attempt in AsyncRetrying(
             stop=stop_after_attempt(3),
@@ -72,6 +107,8 @@ async def fetch(
         raise FetchError(
             f"{exc.status} for {url}", hint="the site may be down; retry later"
         ) from exc
+    except _ChainError as exc:
+        resp = await _retry_with_intermediate(url, send, aia, str(exc))
     except httpx.TransportError as exc:
         raise FetchError(
             f"transport error for {url}: {exc}", hint="check your network connection"

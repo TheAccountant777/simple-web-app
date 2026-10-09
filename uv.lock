@@ -836,6 +836,8 @@ name = "kenya-data-engine"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "certifi" },
+    { name = "cryptography" },
     { name = "feedparser" },
     { name = "httpx" },
     { name = "pdfplumber" },
@@ -867,6 +869,8 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "certifi", specifier = ">=2024.2.2" },
+    { name = "cryptography", specifier = ">=42" },
     { name = "feedparser", specifier = ">=6.0" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "pdfplumber", specifier = ">=0.11" },

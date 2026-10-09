@@ -130,3 +130,14 @@ async def test_union_item_selector_does_not_duplicate_items(respx_mock, ctx):
     respx_mock.get(URL).respond(200, text=html)
     sp = spec(item="table.v tbody tr, table tbody tr", title="td a", link="td a", date=None)
     assert [s.title for s in await adapter(sp).fetch(ctx, OLD)] == ["Only"]
+
+
+async def test_listing_uses_per_source_user_agent(respx_mock, ctx):
+    route = respx_mock.get(URL).respond(200, text='<article><h2><a href="/a">T</a></h2></article>')
+    await adapter(spec(user_agent="python:custom/1")).fetch(ctx, OLD)
+    assert route.calls.last.request.headers["user-agent"] == "python:custom/1"
+
+
+def test_build_adapters_passes_packaged_reddit_user_agent(ctx):
+    reddit = next(a for a in build_adapters(ctx.config, ctx.home) if a.name == "reddit_kenya")
+    assert reddit.user_agent == "python:kenya-data-engine:v0.1 (research)"

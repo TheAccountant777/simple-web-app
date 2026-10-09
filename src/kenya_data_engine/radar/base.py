@@ -118,7 +118,7 @@ def build_adapters(config: EngineConfig, home: EngineHome) -> list[Adapter]:
         if not spec.enabled:
             continue
         if spec.type == "rss":
-            adapters.append(RssAdapter(name, spec.url, spec.kind))
+            adapters.append(RssAdapter(name, spec.url, spec.kind, spec.user_agent))
         else:
             try:
                 adapters.append(ListingAdapter(name, spec, config.radar.max_items))
