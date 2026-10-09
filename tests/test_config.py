@@ -129,3 +129,20 @@ def test_invalid_listing_kind_raises_config_error(tmp_home):
     tmp_home.config_path.write_text("radar:\n  listings:\n    cbk:\n      kind: bogus\n")
     with pytest.raises(ConfigError):
         load_config(tmp_home)
+
+
+@pytest.mark.parametrize("bad", [".nan", ".inf"])
+def test_weights_reject_non_finite(tmp_home, bad):
+    tmp_home.config_path.write_text(
+        f"weights: {{data_ability: {bad}, wallet_impact: 0.2, timeliness: 0.2,"
+        " clarity_gap: 0.15, novelty: 0.1}\n"
+    )
+    with pytest.raises(ConfigError):
+        load_config(tmp_home)
+
+
+def test_unknown_weight_key_rejected(tmp_home):
+    tmp_home.config_path.write_text("weights: {noveltty: 0.1}\n")
+    with pytest.raises(ConfigError) as ei:
+        load_config(tmp_home)
+    assert "noveltty" in (ei.value.hint or "")

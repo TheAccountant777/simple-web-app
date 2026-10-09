@@ -51,6 +51,16 @@ async def open_context(
         config.llm.pricing.input_per_m,
         config.llm.pricing.output_per_m,
         config.budgets.run_usd,
+        secrets=[
+            v.get_secret_value()
+            for v in (
+                secrets.deepseek_api_key,
+                secrets.tavily_api_key,
+                secrets.serper_api_key,
+                secrets.jina_api_key,
+            )
+            if v is not None
+        ],
     )
     async with httpx.AsyncClient() as client:
         yield RunContext(

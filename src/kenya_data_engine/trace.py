@@ -4,7 +4,7 @@ import json
 import re
 import time
 from collections import defaultdict
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -17,11 +17,17 @@ from kenya_data_engine.errors import BudgetExceeded
 _SECRET_KEY = re.compile(r"key|token|secret", re.IGNORECASE)
 
 
-def _redact(value: Any) -> Any:
+def _redact(value: Any, secrets: Sequence[str] = ()) -> Any:
     if isinstance(value, dict):
-        return {k: "***" if _SECRET_KEY.search(str(k)) else _redact(v) for k, v in value.items()}
+        return {
+            k: "***" if _SECRET_KEY.search(str(k)) else _redact(v, secrets)
+            for k, v in value.items()
+        }
     if isinstance(value, list):
-        return [_redact(v) for v in value]
+        return [_redact(v, secrets) for v in value]
+    if isinstance(value, str):
+        for secret in secrets:
+            value = value.replace(secret, "***")
     return value
 
 
@@ -49,12 +55,15 @@ class Tracer:
         input_per_m: float,
         output_per_m: float,
         run_budget_usd: float,
+        secrets: Sequence[str] = (),
     ) -> None:
         self.path = path
         self.run_id = run_id
         self.input_per_m = input_per_m
         self.output_per_m = output_per_m
         self.run_budget_usd = run_budget_usd
+        # Longest first so a secret that contains another is fully masked.
+        self._secrets = sorted((x for x in secrets if x), key=len, reverse=True)
         self.total_cost = 0.0
         self._events: list[TraceEvent] = []
 
@@ -66,7 +75,9 @@ class Tracer:
         self._events.append(event)
         self.total_cost += event.cost_usd
         data = event.model_dump(mode="json")
-        data["attrs"] = _redact(data["attrs"])
+        data["attrs"] = _redact(data["attrs"], self._secrets)
+        if isinstance(data["error"], str):
+            data["error"] = _redact(data["error"], self._secrets)
         with self.path.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(data, ensure_ascii=False) + "\n")
             fh.flush()

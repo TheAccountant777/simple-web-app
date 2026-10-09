@@ -89,3 +89,29 @@ def test_summary(tmp_path):
     assert s["stages"]["synthesize"]["cost_usd"] == pytest.approx(0.75)
     assert s["stages"]["radar"]["events"] == 1
     assert s["total_cost_usd"] == pytest.approx(0.75)
+
+
+def test_secret_values_redacted_in_error_and_attrs(tmp_path):
+    from datetime import UTC, datetime
+
+    from kenya_data_engine.trace import TraceEvent
+
+    t = Tracer(tmp_path / "t.jsonl", "r", 0.15, 0.60, 0.5, secrets=["sk-abc123"])
+    t.record(
+        TraceEvent(
+            ts=datetime.now(UTC),
+            run_id="r",
+            stage="s",
+            kind="http",
+            name="n",
+            status="error",
+            latency_ms=1,
+            error="401 for https://x?k=sk-abc123",
+            attrs={"url": "https://x?k=sk-abc123", "nested": ["sk-abc123"], "n": 1},
+        )
+    )
+    raw = (tmp_path / "t.jsonl").read_text()
+    assert "sk-abc123" not in raw
+    row = lines(tmp_path)[0]
+    assert row["error"] == "401 for https://x?k=***"
+    assert row["attrs"]["n"] == 1

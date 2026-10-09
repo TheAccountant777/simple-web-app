@@ -1,5 +1,6 @@
 """Configuration: secrets and the merged engine config."""
 
+import math
 from importlib import resources
 from typing import Any
 
@@ -121,9 +122,12 @@ def load_config(home: EngineHome) -> EngineConfig:
         cfg = EngineConfig.model_validate(merged)
     except ValidationError as exc:
         raise ConfigError("invalid config", hint=str(exc)) from exc
-    if set(cfg.weights) != WEIGHT_KEYS or any(v < 0 for v in cfg.weights.values()):
+    bad_values = any(not math.isfinite(v) or v < 0 for v in cfg.weights.values())
+    if set(cfg.weights) != WEIGHT_KEYS or bad_values:
         raise ConfigError(
-            "weights must have exactly the keys " + ", ".join(sorted(WEIGHT_KEYS)) + " and be >= 0",
+            "weights must have exactly the keys "
+            + ", ".join(sorted(WEIGHT_KEYS))
+            + " and be finite and >= 0",
             hint=f"edit `weights` in {home.config_path}; current keys are "
             f"{', '.join(sorted(cfg.weights))}",
         )
