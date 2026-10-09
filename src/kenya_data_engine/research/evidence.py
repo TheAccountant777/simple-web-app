@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Literal
 
 import pdfplumber
+from pydantic import BaseModel
 from trafilatura import extract_metadata
 
 from kenya_data_engine.context import RunContext
@@ -64,6 +65,19 @@ def _html_meta(html: str) -> date | None:
         return date.fromisoformat(str(raw)[:10]) if raw else None
     except ValueError:
         return None
+
+
+class _KeyRow(BaseModel):
+    url: str
+    sha: str
+    pages: list[int]
+    id: str
+
+
+class _Index(BaseModel):
+    items: list[TextEvidence]
+    seen_urls: list[str]
+    keys: list[_KeyRow]
 
 
 class RobotsDisallowed(FetchError):
@@ -172,6 +186,42 @@ class EvidenceBook:
         self.items.append(ev)
         self.seen_urls.update((url, final_url))
         return ev
+
+    # --- persistence (resume) -------------------------------------------------------------
+
+    @property
+    def index_path(self) -> Path:
+        return self._run_dir / "research" / "evidence.json"
+
+    def save(self) -> None:
+        """Write the index next to the evidence texts, atomically. Urls are the redacted ones."""
+        index = _Index(
+            items=self.items,
+            seen_urls=sorted(self.seen_urls),
+            keys=[
+                _KeyRow(url=u, sha=sha, pages=list(pages), id=ev.id)
+                for (u, sha, pages), ev in self._keys.items()
+            ],
+        )
+        path = self.index_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(index.model_dump_json(indent=2), encoding="utf-8")
+        tmp.replace(path)
+
+    def load(self) -> bool:
+        """Reload the index saved by `save`. False when none exists or it is unreadable."""
+        try:
+            index = _Index.model_validate_json(self.index_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return False
+        by_id = {ev.id: ev for ev in index.items}
+        self.items = list(index.items)
+        self.seen_urls = set(index.seen_urls)
+        self._keys = {
+            (k.url, k.sha, tuple(k.pages)): by_id[k.id] for k in index.keys if k.id in by_id
+        }
+        return True
 
     # --- reading --------------------------------------------------------------------------
 

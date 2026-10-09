@@ -151,3 +151,30 @@ def test_snippets_last_paragraph_near_cap(tmp_path):
     fits = book.add_text("https://x.com/fit", "A" * 99 + ".\n" + "needle " + "w" * 150, "t", None)
     out2 = book.snippets(fits, "needle", max_chars=200)
     assert out2.startswith("[…]\n") and not out2.endswith("[…]")
+
+
+async def test_save_and_load_round_trip(respx_mock, ctx, data_net, tmp_path):
+    respx_mock.get("https://www.epra.go.ke/prices").respond(
+        200, content=_html(LONG), headers={"content-type": "text/html"}
+    )
+    book = EvidenceBook(tmp_path, TIERS)
+    ev = await book.add_url("https://www.epra.go.ke/prices", ctx)
+    book.add_text("https://x.ke/y", "Some text.", "T", date(2026, 9, 1))
+    book.save()
+    assert (tmp_path / "research" / "evidence.json").exists()
+
+    fresh = EvidenceBook(tmp_path, TIERS)
+    assert fresh.load() and [e.label for e in fresh.items] == ["E1", "E2"]
+    assert fresh.get("E1") == ev and fresh.text(ev) == book.text(ev)
+    assert fresh.seen_urls == book.seen_urls
+    # the dedupe index survives: re-adding the same page returns the same evidence
+    again = await fresh.add_url("https://www.epra.go.ke/prices", ctx)
+    assert again.id == ev.id and len(fresh.items) == 2
+
+
+def test_load_missing_or_corrupt_index(tmp_path):
+    book = EvidenceBook(tmp_path, TIERS)
+    assert not book.load()
+    (tmp_path / "research").mkdir()
+    (tmp_path / "research" / "evidence.json").write_text("{not json")
+    assert not book.load() and book.items == []
