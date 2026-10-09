@@ -44,7 +44,7 @@ DataTable > .datatable--header { background: #181b21; color: #7d8594; text-style
 #source-detail-box { height: 10; padding: 0 1; }
 #test-progress { padding: 0 1; height: 1; }
 
-InspectorScreen, HelpScreen { align: center middle; background: #0c0d10; }
+InspectorScreen, HelpScreen, RunCountScreen { align: center middle; background: #0c0d10; }
 #inspector { width: 92%; height: 92%; background: #181b21; border: round #7aa2c4; }
 #inspector VerticalScroll { padding: 0 1; }
 #inspector-keys { height: 1; padding: 0 1; color: #7d8594; background: #1b1e25; }
@@ -53,8 +53,8 @@ InspectorScreen, HelpScreen { align: center middle; background: #0c0d10; }
 
 /* Live tab */
 LivePane { layout: vertical; padding: 0 1; }
-#pipeline { height: 4; margin-top: 1; }
-LivePane.compact #pipeline { height: 2; margin-top: 0; }
+#pipeline { height: 4; }
+LivePane.compact #pipeline { height: 2; }
 #live-mid { height: 8; }
 LivePane.compact #live-mid { height: 6; }
 #sources-box, #gauges, #events, #live-result {
@@ -72,3 +72,8 @@ LivePane.compact #live-mid { height: 6; }
 #live-result { height: auto; max-height: 5; padding: 0 1; }
 #events { height: 1fr; padding: 0 1; }
 #events:focus { border: round #7aa2c4; }
+#live-controls { height: 1; }
+#live-controls Button { height: 1; width: 16; border: none; margin-right: 2; padding: 0 1; }
+#live-controls Button:disabled { opacity: 60%; }
+#run-counter { width: auto; padding: 0 1; color: #d9b26f; text-style: bold; }
+#run-count { width: 60; height: auto; background: #181b21; border: round #7aa2c4; padding: 1 2; }

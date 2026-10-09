@@ -20,8 +20,9 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.message import Message
+from textual.screen import ModalScreen
 from textual.widget import Widget
-from textual.widgets import ProgressBar, RichLog, Static
+from textual.widgets import Button, ProgressBar, RichLog, Static
 from textual.worker import Worker
 
 from kenya_data_engine.config import load_secrets
@@ -40,6 +41,7 @@ from kenya_data_engine.tui.widgets import ACCENT, BAD, GOOD, INK, MUTED, WARN, S
 SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 KIND_ICON = {"llm": "✦", "tool": "◇", "http": "↔", "stage": "▣"}
 MAX_EVENT_LINES = 2000
+MIN_RUNS, MAX_RUNS, DEFAULT_RUNS = 2, 5, 3
 TILE_WIDTH = 24
 COMPACT_BELOW = 20  # pane height under which the layout drops to its 80x24 form
 IDLE_HINT = "Press r to start a run — every trace event streams here."
@@ -264,9 +266,12 @@ def format_event_line(ev: TraceEvent, scrub: Scrub, width: int) -> Text:
 
 
 class RunStarted(Message):
-    def __init__(self, run_id: str, budget: float, expected: list[str]) -> None:
+    def __init__(
+        self, run_id: str, budget: float, expected: list[str], index: int = 1, total: int = 1
+    ) -> None:
         super().__init__()
         self.run_id, self.budget, self.expected = run_id, budget, expected
+        self.index, self.total = index, total
 
 
 class TraceArrived(Message):
@@ -282,9 +287,9 @@ class StageArrived(Message):
 
 
 class RunFinished(Message):
-    def __init__(self, topics: int | None, dropped: int | None) -> None:
+    def __init__(self, topics: int | None, dropped: int | None, last: bool = True) -> None:
         super().__init__()
-        self.topics, self.dropped = topics, dropped
+        self.topics, self.dropped, self.last = topics, dropped, last
 
 
 class RunFailed(Message):
@@ -331,12 +336,62 @@ class SourceGrid(Static):
         return render_sources(tiles, self.size.width)
 
 
+class ControlButton(Button, can_focus=False):
+    """Mouse affordance only: the keyboard path is r / R / x, so focus never lands here."""
+
+
+class RunCountScreen(ModalScreen[int | None]):
+    """Pick how many runs to execute back to back (2-5)."""
+
+    BINDINGS = [
+        Binding("escape", "dismiss(None)", "Cancel"),
+        Binding("enter", "confirm", "Start"),
+        Binding("up,right,plus", "adjust(1)", "More", show=False),
+        Binding("down,left,minus", "adjust(-1)", "Fewer", show=False),
+        *[Binding(str(n), f"pick({n})", show=False) for n in range(MIN_RUNS, MAX_RUNS + 1)],
+    ]
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.count = DEFAULT_RUNS
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="run-count"):
+            yield Static(id="run-count-body")
+            yield Static("[b]2-5[/] or [b]↑↓[/] choose   [b]enter[/] start   [b]esc[/] cancel")
+
+    def on_mount(self) -> None:
+        self._render_count()
+
+    def _render_count(self) -> None:
+        body = Text()
+        body.append(f"How many runs?  ◀ {self.count} ▶\n", style=f"bold {INK}")
+        body.append(
+            "Each is a fresh run, one after another; x stops the rest.\n"
+            "Then compare them in the Runs tab (space to select, c).",
+            style=MUTED,
+        )
+        self.query_one("#run-count-body", Static).update(body)
+
+    def action_adjust(self, delta: int) -> None:
+        self.count = max(MIN_RUNS, min(MAX_RUNS, self.count + delta))
+        self._render_count()
+
+    def action_pick(self, n: int) -> None:
+        self.count = n
+        self._render_count()
+
+    def action_confirm(self) -> None:
+        self.dismiss(self.count)
+
+
 # ---- the pane ------------------------------------------------------------------------------
 
 
 class LivePane(Widget):
     BINDINGS = [
         Binding("r", "start", "Run"),
+        Binding("R", "start_many", "Run ×N"),
         Binding("x", "cancel", "Cancel"),
         Binding("enter", "open_run", "Open run"),
     ]
@@ -358,9 +413,14 @@ class LivePane(Widget):
         self._worker: Worker[None] | None = None
         self._timer: Any = None
         self._finished_run: str | None = None
+        self.run_index = self.run_total = 1
 
     # -- layout --
     def compose(self) -> ComposeResult:
+        with Horizontal(id="live-controls"):
+            yield ControlButton("▶ New run", id="btn-run", variant="primary")
+            yield ControlButton("▶▶ Run ×N", id="btn-multi")
+            yield Static(id="run-counter")
         yield PipelineStrip(self)
         with Horizontal(id="live-mid"):
             with VerticalScroll(id="sources-box"):
@@ -400,15 +460,41 @@ class LivePane(Widget):
 
     # -- actions --
     def action_start(self) -> None:
+        self._begin(1)
+
+    def action_start_many(self) -> None:
+        if self.running:
+            self._begin(1)  # reports "already in progress"
+            return
+        self.app.push_screen(RunCountScreen(), self._begin_many)
+
+    def _begin_many(self, count: int | None) -> None:
+        if count:
+            self._begin(count)
+
+    def _begin(self, count: int) -> None:
         if self.running:
             self.notify("A run is already in progress — x cancels it", severity="warning")
             return
         self._reset()
         self.running = True
+        self._set_buttons()
         self._timer = self.set_interval(0.1, self._on_tick)
         self._worker = self.run_worker(
-            self._execute(), name="live-run", group="live", exit_on_error=False
+            self._execute(count), name="live-run", group="live", exit_on_error=False
         )
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        event.stop()
+        if event.button.id == "btn-run":
+            self.action_start()
+        elif event.button.id == "btn-multi":
+            self.action_start_many()
+
+    def _set_buttons(self) -> None:
+        run = self.query_one("#btn-run", Button)
+        run.disabled = self.query_one("#btn-multi", Button).disabled = self.running
+        run.label = "↻ Run again" if self._finished_run is not None else "▶ New run"
 
     def action_cancel(self) -> None:
         if self.running and self._worker is not None:
@@ -423,42 +509,12 @@ class LivePane(Widget):
             open_run(self._finished_run)
 
     # -- the worker (never touches a widget) --
-    async def _execute(self) -> None:
+    async def _execute(self, count: int = 1) -> None:
         try:
             if self.stages_factory is None and load_secrets(self.home).deepseek_api_key is None:
                 raise ConfigError("DEEPSEEK_API_KEY not set", hint="run `engine init`")
-            stages = (self.stages_factory or default_stages)()
-            run = RunStore(self.home.runs_dir).new_run(datetime.now())
-
-            def on_stage(e: StageEvent) -> None:
-                self.post_message(StageArrived(e))
-
-            def on_trace(e: TraceEvent) -> None:
-                self.post_message(TraceArrived(e))
-
-            async with open_context(self.home, run, on_stage) as rc:
-                unsubscribe = rc.tracer.subscribe(on_trace)
-                try:
-                    expected = (
-                        sorted(enabled_source_names(self.home) - {"calendar"})
-                        if any(s.name == "radar" for s in stages)
-                        else []
-                    )
-                    if expected:
-                        expected.insert(0, "calendar")
-                    self.post_message(
-                        RunStarted(run.run_id, rc.config.budgets.run_usd, [s.name for s in stages])
-                    )
-                    self.post_message(TraceSources(expected))
-                    result = await run_pipeline(stages, rc)
-                finally:
-                    unsubscribe()
-            topics = result if isinstance(result, TopicList) else None
-            self.post_message(
-                RunFinished(
-                    len(topics.topics) if topics else None, len(topics.dropped) if topics else None
-                )
-            )
+            for index in range(1, count + 1):
+                await self._one_run(index, count)
         except asyncio.CancelledError:
             self.post_message(RunCancelled())
             raise
@@ -469,12 +525,62 @@ class LivePane(Widget):
                 RunFailed(str(exc) or type(exc).__name__, "see trace.jsonl in the run folder")
             )
 
+    async def _one_run(self, index: int, total: int) -> None:
+        stages = (self.stages_factory or default_stages)()
+        run = RunStore(self.home.runs_dir).new_run(datetime.now())
+
+        def on_stage(e: StageEvent) -> None:
+            self.post_message(StageArrived(e))
+
+        def on_trace(e: TraceEvent) -> None:
+            self.post_message(TraceArrived(e))
+
+        async with open_context(self.home, run, on_stage) as rc:
+            unsubscribe = rc.tracer.subscribe(on_trace)
+            try:
+                expected = (
+                    sorted(enabled_source_names(self.home) - {"calendar"})
+                    if any(s.name == "radar" for s in stages)
+                    else []
+                )
+                if expected:
+                    expected.insert(0, "calendar")
+                self.post_message(
+                    RunStarted(
+                        run.run_id,
+                        rc.config.budgets.run_usd,
+                        [s.name for s in stages],
+                        index,
+                        total,
+                    )
+                )
+                self.post_message(TraceSources(expected))
+                result = await run_pipeline(stages, rc)
+            finally:
+                unsubscribe()
+        topics = result if isinstance(result, TopicList) else None
+        self.post_message(
+            RunFinished(
+                len(topics.topics) if topics else None,
+                len(topics.dropped) if topics else None,
+                last=index == total,
+            )
+        )
+
     # -- message handlers (UI thread) --
     def on_run_started(self, msg: RunStarted) -> None:
         self.run_id = msg.run_id
+        self.run_index, self.run_total = msg.index, msg.total
+        if msg.index > 1:  # a fresh run of a series: clean slate, same stream
+            self.state = LiveState(budget=msg.budget)
+            self.query_one("#events", RichLog).write(
+                Text(f"── run {msg.index}/{msg.total} · {msg.run_id} ──", style=MUTED)
+            )
         self.state.budget = msg.budget
         self.state.stages = {n: StageView(n) for n in msg.expected}
         self.state.started = time.monotonic()
+        counter = self.query_one("#run-counter", Static)
+        counter.update(f"run {msg.index}/{msg.total}" if msg.total > 1 else "")
         self._refresh_all()
 
     def on_trace_sources(self, msg: "TraceSources") -> None:
@@ -492,24 +598,35 @@ class LivePane(Widget):
         self._refresh_all()
 
     def on_run_finished(self, msg: RunFinished) -> None:
-        self._stop(f"{self.run_id}")
         self._finished_run = self.run_id
+        if not msg.last:  # more runs follow: just let the Runs tab know about this one
+            self._notify_app()
+            return
+        self._stop()
         s = self.state
         counts = f" · {msg.topics} topics · {msg.dropped} dropped" if msg.topics is not None else ""
         text = Text()
-        text.append("✓ Run complete ", style=f"bold {GOOD}")
-        text.append(f"{self.run_id}{counts}\n", style=INK)
-        text.append(
-            f"${s.cost:.4f} of ${s.budget:.2f} · {fmt_secs(s.elapsed())} · {s.llm_calls} LLM "
-            f"calls · enter opens it in the Runs tab",
-            style=MUTED,
-        )
+        if self.run_total > 1:
+            text.append(f"✓ {self.run_total} runs complete ", style=f"bold {GOOD}")
+            text.append(f"· last {self.run_id}{counts}\n", style=INK)
+            text.append(
+                "In the Runs tab: space selects runs, c compares them · enter opens the last",
+                style=MUTED,
+            )
+        else:
+            text.append("✓ Run complete ", style=f"bold {GOOD}")
+            text.append(f"{self.run_id}{counts}\n", style=INK)
+            text.append(
+                f"${s.cost:.4f} of ${s.budget:.2f} · {fmt_secs(s.elapsed())} · {s.llm_calls} LLM "
+                f"call{'' if s.llm_calls == 1 else 's'} · enter opens it in the Runs tab",
+                style=MUTED,
+            )
         self._show_result(text, GOOD)
         self._notify_app()
 
     def on_run_failed(self, msg: RunFailed) -> None:
-        self._stop(None)
         self._finished_run = self.run_id
+        self._stop()
         text = Text()
         text.append("✗ Run failed  ", style=f"bold {BAD}")
         text.append(self.scrub(msg.message), style=INK)
@@ -519,8 +636,8 @@ class LivePane(Widget):
         self._notify_app()
 
     def on_run_cancelled(self, msg: RunCancelled) -> None:
-        self._stop(None)
         self._finished_run = self.run_id
+        self._stop()
         for view in self.state.stages.values():
             if view.state == "running":
                 view.state = "error"
@@ -543,14 +660,16 @@ class LivePane(Widget):
         self.state = LiveState(budget=self.state.budget)
         self.run_id = None
         self._finished_run = None
+        self.query_one("#run-counter", Static).update("")
         self.query_one("#live-result").display = False
         log = self.query_one("#events", RichLog)
         log.clear()
         self._show_idle_stages()
         self._refresh_all()
 
-    def _stop(self, _label: str | None) -> None:
+    def _stop(self) -> None:
         self.running = False
+        self._set_buttons()
         self.state.finished = time.monotonic()
         if self._timer is not None:
             self._timer.stop()

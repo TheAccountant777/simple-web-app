@@ -349,3 +349,105 @@ async def test_empty_home_runs_hint_is_accurate(tmp_home):
         await start_run(pilot)
         await wait_for(pilot, lambda: "complete" in screen_text(app))
         assert RunStore(tmp_home.runs_dir).list()
+
+
+# ---- live controls: buttons, run again, run xN ----------------------------------------------
+
+
+async def test_new_run_button_starts_a_run_and_becomes_run_again(tmp_home):
+    from textual.widgets import Button
+
+    gates = Gates()
+    app = app_with(tmp_home, lambda: fake_stages(gates))
+    async with app.run_test(size=SIZE) as pilot:
+        await pilot.press("1")
+        await pilot.pause()
+        button = app.query_one("#btn-run", Button)
+        assert "New run" in str(button.label) and not button.disabled
+        assert "▶ New run" in screen_text(app) and "Run ×N" in screen_text(app)
+        await pilot.click("#btn-run")
+        await wait_for(pilot, lambda: gates.radar_started.is_set())
+        assert button.disabled and app.query_one("#btn-multi", Button).disabled
+        gates.radar_go.set()
+        gates.synth_go.set()
+        await wait_for(pilot, lambda: "complete" in screen_text(app))
+        assert not button.disabled and "↻ Run again" in str(button.label)
+
+
+async def test_button_says_run_again_after_a_failure(tmp_home):
+    from textual.widgets import Button
+
+    app = app_with(tmp_home, lambda: fake_stages(fail=RuntimeError("nope")))
+    async with app.run_test(size=SIZE) as pilot:
+        await start_run(pilot)
+        await wait_for(pilot, lambda: "nope" in screen_text(app))
+        assert "↻ Run again" in str(app.query_one("#btn-run", Button).label)
+
+
+async def test_run_n_times_sequentially(tmp_home):
+    gates = Gates()
+    app = app_with(tmp_home, lambda: fake_stages(gates))
+    store = RunStore(tmp_home.runs_dir)
+    async with app.run_test(size=SIZE) as pilot:
+        await pilot.press("1")
+        await pilot.pause()
+        await pilot.press("R")
+        await pilot.pause()
+        assert "How many runs" in screen_text(app)
+        await pilot.press("2")
+        await pilot.press("enter")
+        await wait_for(pilot, lambda: gates.radar_started.is_set())
+        assert "run 1/2" in screen_text(app)
+        gates.radar_go.set()
+        gates.synth_go.set()
+        await wait_for(pilot, lambda: "2 runs complete" in screen_text(app))
+        assert len(store.list()) == 2
+        assert len(app.query_one("RunsPane").run_ids) == 2  # each run showed up in the Runs tab
+
+
+async def test_run_n_default_is_three_and_escape_cancels(tmp_home):
+    app = app_with(tmp_home, lambda: fake_stages())
+    async with app.run_test(size=SIZE) as pilot:
+        await pilot.press("1")
+        await pilot.pause()
+        await pilot.press("R")
+        await pilot.pause()
+        assert "3" in screen_text(app)
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not app.query_one(LivePane).running
+        await pilot.press("R")
+        await pilot.pause()
+        await pilot.press("enter")
+        await wait_for(pilot, lambda: "3 runs complete" in screen_text(app))
+        assert len(RunStore(tmp_home.runs_dir).list()) == 3
+
+
+async def test_cancel_stops_the_remaining_runs(tmp_home):
+    gates = Gates()
+    app = app_with(tmp_home, lambda: fake_stages(gates))
+    store = RunStore(tmp_home.runs_dir)
+    async with app.run_test(size=SIZE) as pilot:
+        await pilot.press("1")
+        await pilot.pause()
+        await pilot.press("R")
+        await pilot.pause()
+        await pilot.press("enter")
+        await wait_for(pilot, lambda: gates.radar_started.is_set())
+        await pilot.press("x")
+        await wait_for(pilot, lambda: "cancelled" in screen_text(app))
+        await pilot.pause(0.3)
+        assert len(store.list()) == 1  # runs 2 and 3 never started
+
+
+async def test_failure_stops_the_remaining_runs(tmp_home):
+    app = app_with(tmp_home, lambda: fake_stages(fail=RuntimeError("provider down")))
+    async with app.run_test(size=SIZE) as pilot:
+        await pilot.press("1")
+        await pilot.pause()
+        await pilot.press("R")
+        await pilot.pause()
+        await pilot.press("enter")
+        await wait_for(pilot, lambda: "provider down" in screen_text(app))
+        await pilot.pause(0.3)
+        assert len(RunStore(tmp_home.runs_dir).list()) == 1
