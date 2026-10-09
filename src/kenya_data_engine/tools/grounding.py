@@ -14,6 +14,7 @@ _TRANSLATE = {
     0x2014: "-",
 }
 MIN_FUZZY_LEN = 20
+_NUMBER = re.compile(r"\d+(?:[.,]\d+)*%?")
 
 
 def normalize(s: str) -> str:
@@ -28,6 +29,8 @@ def quote_in_text(quote: str, text: str, threshold: float = 0.9) -> bool:
     t = normalize(text)
     if q in t:
         return True
-    if len(q) < MIN_FUZZY_LEN:
+    if any(n not in t for n in _NUMBER.findall(q)):
+        return False
+    if len(q) < MIN_FUZZY_LEN or len(t) < len(q):
         return False
     return bool(fuzz.partial_ratio(q, t) >= threshold * 100)

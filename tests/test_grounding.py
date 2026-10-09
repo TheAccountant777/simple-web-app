@@ -30,3 +30,16 @@ def test_grounding_fuzzy_accepts_near_match_long_quote():
 def test_empty_quote_false():
     assert not quote_in_text("", "anything")
     assert not quote_in_text("   ", "anything")
+
+
+def test_grounding_rejects_single_digit_difference():
+    text = "The central bank held the rate at 9.5 percent citing inflation pressures today."
+    quote = "The central bank held the rate at 9.6 percent citing inflation pressures today."
+    assert len(quote) >= 70
+    assert not quote_in_text(quote, text)
+
+
+def test_grounding_rejects_quote_longer_than_text():
+    text = "inflation rose to 4.4 percent in september"
+    quote = text + " and the shilling collapsed against the dollar"
+    assert not quote_in_text(quote, text)
