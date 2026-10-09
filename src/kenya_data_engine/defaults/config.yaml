@@ -26,6 +26,14 @@ llm:
       model: deepseek-flash
       max_tokens: 4096
       extra_body: {thinking: {type: disabled}}
+    research_planner:
+      model: deepseek-flash
+      max_tokens: 4096
+      extra_body: {thinking: {type: disabled}}
+    research_scout:
+      model: deepseek-flash
+      max_tokens: 4096
+      extra_body: {thinking: {type: disabled}}
     research_smoke:
       model: deepseek-flash
       max_tokens: 512
