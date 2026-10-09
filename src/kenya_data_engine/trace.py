@@ -1,0 +1,156 @@
+"""JSONL tracing with cost accounting and a run budget."""
+
+import json
+import re
+import time
+from collections import defaultdict
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any, Literal
+
+from pydantic import BaseModel, Field
+
+from kenya_data_engine.errors import BudgetExceeded
+
+_SECRET_KEY = re.compile(r"key|token|secret", re.IGNORECASE)
+
+
+def _redact(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {k: "***" if _SECRET_KEY.search(str(k)) else _redact(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_redact(v) for v in value]
+    return value
+
+
+class TraceEvent(BaseModel):
+    ts: datetime
+    run_id: str
+    stage: str
+    kind: Literal["llm", "tool", "http", "stage"]
+    name: str
+    status: Literal["ok", "error"]
+    latency_ms: int
+    topic_id: str | None = None
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cost_usd: float = 0.0
+    error: str | None = None
+    attrs: dict[str, Any] = Field(default_factory=dict)
+
+
+class Tracer:
+    def __init__(
+        self,
+        path: Path,
+        run_id: str,
+        input_per_m: float,
+        output_per_m: float,
+        run_budget_usd: float,
+    ) -> None:
+        self.path = path
+        self.run_id = run_id
+        self.input_per_m = input_per_m
+        self.output_per_m = output_per_m
+        self.run_budget_usd = run_budget_usd
+        self.total_cost = 0.0
+        self._events: list[TraceEvent] = []
+
+    @property
+    def remaining_usd(self) -> float:
+        return self.run_budget_usd - self.total_cost
+
+    def record(self, event: TraceEvent) -> None:
+        self._events.append(event)
+        self.total_cost += event.cost_usd
+        data = event.model_dump(mode="json")
+        data["attrs"] = _redact(data["attrs"])
+        with self.path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(data, ensure_ascii=False) + "\n")
+            fh.flush()
+
+    def record_llm(
+        self,
+        stage: str,
+        name: str,
+        input_tokens: int,
+        output_tokens: int,
+        latency_ms: int,
+        topic_id: str | None = None,
+        status: Literal["ok", "error"] = "ok",
+        error: str | None = None,
+    ) -> float:
+        cost = (input_tokens * self.input_per_m + output_tokens * self.output_per_m) / 1_000_000
+        self.record(
+            TraceEvent(
+                ts=datetime.now(UTC),
+                run_id=self.run_id,
+                stage=stage,
+                kind="llm",
+                name=name,
+                status=status,
+                latency_ms=latency_ms,
+                topic_id=topic_id,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cost_usd=cost,
+                error=error,
+            )
+        )
+        return cost
+
+    @asynccontextmanager
+    async def span(
+        self,
+        stage: str,
+        kind: Literal["llm", "tool", "http", "stage"],
+        name: str,
+        topic_id: str | None = None,
+    ) -> AsyncIterator[None]:
+        start = time.perf_counter()
+        error: str | None = None
+        try:
+            yield
+        except BaseException as exc:
+            error = str(exc) or type(exc).__name__
+            raise
+        finally:
+            self.record(
+                TraceEvent(
+                    ts=datetime.now(UTC),
+                    run_id=self.run_id,
+                    stage=stage,
+                    kind=kind,
+                    name=name,
+                    status="ok" if error is None else "error",
+                    latency_ms=int((time.perf_counter() - start) * 1000),
+                    topic_id=topic_id,
+                    error=error,
+                )
+            )
+
+    def check_budget(self) -> None:
+        if self.total_cost >= self.run_budget_usd:
+            raise BudgetExceeded(
+                f"run budget of ${self.run_budget_usd:.2f} exhausted",
+                hint="raise budgets.run_usd in config.yaml",
+            )
+
+    def summary(self) -> dict[str, Any]:
+        stages: dict[str, dict[str, Any]] = defaultdict(
+            lambda: {"events": 0, "cost_usd": 0.0, "errors": 0}
+        )
+        for e in self._events:
+            s = stages[e.stage]
+            s["events"] += 1
+            s["cost_usd"] += e.cost_usd
+            s["errors"] += e.status == "error"
+        return {
+            "run_id": self.run_id,
+            "events": len(self._events),
+            "errors": sum(e.status == "error" for e in self._events),
+            "total_cost_usd": self.total_cost,
+            "stages": dict(stages),
+        }
