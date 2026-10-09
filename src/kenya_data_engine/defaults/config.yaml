@@ -60,6 +60,33 @@ research:
   protected: [claims, challenge]
   scout_concurrency: 3
   monthly_search_credits: 1000
+  max_rounds: 3
+  stale_days: {price: 45, rate: 45, statistic: 75, annual: 550, legal_status: 365, event: 365, forecast: 365, other: 365}
+  tiers:  # domain suffix -> source tier; unknown domains are tier 4
+    epra.go.ke: 1
+    centralbank.go.ke: 1
+    knbs.or.ke: 1
+    treasury.go.ke: 1
+    parliament.go.ke: 1
+    kenyalaw.org: 1
+    cma.or.ke: 1
+    nse.co.ke: 1
+    kra.go.ke: 1
+    worldbank.org: 1
+    imf.org: 1
+    cob.go.ke: 2
+    oagkenya.go.ke: 2
+    go.ke: 2
+    businessdailyafrica.com: 3
+    nation.africa: 3
+    standardmedia.co.ke: 3
+    the-star.co.ke: 3
+    capitalfm.co.ke: 3
+    kbc.co.ke: 3
+    reuters.com: 3
+    bloomberg.com: 3
+    africacheck.org: 3
+    pesacheck.org: 3
 
 data:
   max_bytes: {html: 5000000, pdf: 25000000, sheet: 10000000}

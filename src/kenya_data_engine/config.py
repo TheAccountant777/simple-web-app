@@ -102,6 +102,9 @@ class ResearchConfig(_Strict):
     protected: list[str]
     scout_concurrency: int = 3
     monthly_search_credits: int = 1000
+    tiers: dict[str, int]
+    stale_days: dict[str, int]
+    max_rounds: int = 3
 
     @model_validator(mode="after")
     def _shares_sum_to_one(self) -> "ResearchConfig":
