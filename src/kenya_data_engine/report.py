@@ -7,6 +7,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from kenya_data_engine.config import load_sources
+from kenya_data_engine.home import EngineHome
 from kenya_data_engine.models import TopicList
 from kenya_data_engine.runs import RunHandle
 from kenya_data_engine.trace import TraceEvent
@@ -18,6 +20,13 @@ class SourceStat(BaseModel):
     latency_ms: int
     signals: int | None = None
     error: str | None = None
+    http: int | None = None  # HTTP calls this attempt made (None: trace predates the counter)
+    cache_hits: int | None = None
+
+    @property
+    def cached(self) -> bool:
+        """True when every request was answered from the cache (latency is then meaningless)."""
+        return bool(self.http) and self.cache_hits == self.http
 
 
 class StageStat(BaseModel):
@@ -59,7 +68,9 @@ class Aggregate(BaseModel):
     stage_p50_ms: dict[str, int]
     stage_p95_ms: dict[str, int]
     source_success_rate: dict[str, float]
-    source_mean_latency_ms: dict[str, int]
+    source_mean_latency_ms: dict[str, int | None]  # live attempts only; None = all cached
+    source_cache_share: dict[str, float | None] = Field(default_factory=dict)
+    source_last_error: dict[str, str | None] = Field(default_factory=dict)
     cost_per_run: list[tuple[str, float]]
     duration_per_run: list[tuple[str, int]]
     mean_cache_hit_rate: float | None
@@ -77,6 +88,17 @@ def _read_events(run: RunHandle) -> list[TraceEvent]:
         except ValueError:
             continue  # a torn or foreign line must not hide the rest of the run
     return events
+
+
+def _int_attr(event: TraceEvent, key: str) -> int | None:
+    value = event.attrs.get(key)
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def enabled_source_names(home: EngineHome) -> set[str]:
+    """Sources currently worth reporting on: enabled in sources.yaml, plus the calendar."""
+    sources = load_sources(home)
+    return {n for n, spec in sources.specs.items() if spec.enabled} | {"calendar"}
 
 
 def _stage_detail(name: str, sources: list[SourceStat], topics: TopicList | None) -> str:
@@ -97,8 +119,10 @@ def load_run_metrics(run: RunHandle, budget_usd: float) -> RunMetrics:
             name=e.name,
             status=e.status,
             latency_ms=e.latency_ms,
-            signals=e.attrs.get("signals") if isinstance(e.attrs.get("signals"), int) else None,
+            signals=_int_attr(e, "signals"),
             error=e.error,
+            http=_int_attr(e, "http"),
+            cache_hits=_int_attr(e, "cache_hits"),
         )
         for e in events
         if e.kind == "tool" and e.stage == "radar"
@@ -157,14 +181,25 @@ def percentile(values: list[int], pct: float) -> int:
     return ordered[max(math.ceil(pct / 100 * len(ordered)) - 1, 0)]
 
 
-def build_report(runs: list[RunMetrics]) -> Aggregate:
+def _live_mean(attempts: list[SourceStat]) -> int | None:
+    live = [s.latency_ms for s in attempts if not s.cached]
+    return int(sum(live) / len(live)) if live else None
+
+
+def _cache_share(attempts: list[SourceStat]) -> float | None:
+    calls = sum(s.http or 0 for s in attempts)
+    return sum(s.cache_hits or 0 for s in attempts) / calls if calls else None
+
+
+def build_report(runs: list[RunMetrics], only: set[str] | None = None) -> Aggregate:
     stage_ms: dict[str, list[int]] = defaultdict(list)
     attempts: dict[str, list[SourceStat]] = defaultdict(list)
     for r in runs:
         for st in r.stages:
             stage_ms[st.name].append(st.duration_ms)
         for src in r.sources:
-            attempts[src.name].append(src)
+            if only is None or src.name in only:
+                attempts[src.name].append(src)
     rates = [r.cache_hit_rate for r in runs if r.cache_hit_rate is not None]
     return Aggregate(
         runs=len(runs),
@@ -173,8 +208,11 @@ def build_report(runs: list[RunMetrics]) -> Aggregate:
         source_success_rate={
             k: sum(s.status == "ok" for s in v) / len(v) for k, v in attempts.items()
         },
-        source_mean_latency_ms={
-            k: int(sum(s.latency_ms for s in v) / len(v)) for k, v in attempts.items()
+        source_mean_latency_ms={k: _live_mean(v) for k, v in attempts.items()},
+        source_cache_share={k: _cache_share(v) for k, v in attempts.items()},
+        source_last_error={
+            k: next((s.error for s in reversed(v) if s.status == "error"), None)
+            for k, v in attempts.items()
         },
         cost_per_run=[(r.run_id, r.cost_usd) for r in runs],
         duration_per_run=[(r.run_id, r.duration_ms) for r in runs],

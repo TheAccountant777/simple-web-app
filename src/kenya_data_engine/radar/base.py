@@ -9,6 +9,7 @@ from kenya_data_engine.context import RunContext
 from kenya_data_engine.errors import ConfigError, EngineError, FetchError
 from kenya_data_engine.health import HealthStore
 from kenya_data_engine.home import EngineHome
+from kenya_data_engine.http import HTTP_TALLY
 from kenya_data_engine.models import AdapterError, RadarResult, Signal, normalize_url
 from kenya_data_engine.radar.calendar import CalendarAdapter
 from kenya_data_engine.radar.listing import ListingAdapter
@@ -69,9 +70,14 @@ async def run_radar(adapters: list[Adapter], ctx: RunContext, since: datetime) -
     async def one(adapter: Adapter) -> list[Signal] | AdapterError:
         try:
             async with ctx.tracer.span("radar", "tool", adapter.name) as attrs:
-                found = await fetch_with_timeout(adapter, ctx, since)
-                attrs["signals"] = len(found)
-                return found
+                tally = {"http": 0, "cache_hits": 0}
+                HTTP_TALLY.set(tally)  # this task's own context: other adapters never see it
+                try:
+                    found = await fetch_with_timeout(adapter, ctx, since)
+                    attrs["signals"] = len(found)
+                    return found
+                finally:  # failed sources still report how many calls were live vs cached
+                    attrs.update(tally)
         except Exception as exc:
             return AdapterError(
                 adapter=adapter.name, message=ctx.tracer.redact(str(exc) or type(exc).__name__)

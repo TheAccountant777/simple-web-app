@@ -20,11 +20,17 @@ class ClusterOutput(BaseModel):
     clusters: list[Cluster]
 
 
+def label_for(index: int) -> str:
+    """Short prompt label for the signal at `index` (0-based): S1, S2, ..."""
+    return f"S{index + 1}"
+
+
 def format_signals(signals: list[Signal]) -> str:
+    """One line per signal, led by a short S-label (models mis-copy 12-hex ids)."""
     return "\n".join(
-        f"{s.id} | {s.kind} | {s.source} | "
+        f"{label_for(i)} | {s.kind} | {s.source} | "
         f"{s.published_at.strftime('%Y-%m-%d') if s.published_at else ''} | {s.title[:120]}"
-        for s in signals
+        for i, s in enumerate(signals)
     )
 
 
@@ -49,7 +55,7 @@ async def cluster_signals(
     if not signals:
         return [], []
     signals = _truncate(signals, ctx.config.synth.max_signals)
-    valid = {s.id for s in signals}
+    by_label = {label_for(i): s.id for i, s in enumerate(signals)}
     agent: Agent[None, ClusterOutput] = Agent(
         output_type=ClusterOutput, instructions=load_prompt("cluster")
     )
@@ -66,8 +72,9 @@ async def cluster_signals(
     used: set[str] = set()
     for c in out.clusters:
         ids = []
-        for sid in c.signal_ids:
-            if sid in valid and sid not in used:
+        for label in c.signal_ids:
+            sid = by_label.get(label.strip().upper())
+            if sid is not None and sid not in used:
                 used.add(sid)
                 ids.append(sid)
         if ids:

@@ -97,3 +97,18 @@ async def test_cache_key_is_normalized_url(respx_mock, cache):
         await fetch("https://a.ke/x", client=c, cache=cache, ttl_hours=1)
         r = await fetch("https://a.ke/x#frag", client=c, cache=cache, ttl_hours=1)
     assert r.from_cache and route.call_count == 1
+
+
+async def test_http_tally_counts_calls_and_cache_hits(respx_mock, cache):
+    from kenya_data_engine.http import HTTP_TALLY
+
+    respx_mock.get("https://a.ke/t").respond(200, text="hi")
+    tally = {"http": 0, "cache_hits": 0}
+    token = HTTP_TALLY.set(tally)
+    try:
+        async with httpx.AsyncClient() as client:
+            await fetch("https://a.ke/t", client=client, cache=cache, ttl_hours=1)
+            await fetch("https://a.ke/t", client=client, cache=cache, ttl_hours=1)
+    finally:
+        HTTP_TALLY.reset(token)
+    assert tally == {"http": 2, "cache_hits": 1}

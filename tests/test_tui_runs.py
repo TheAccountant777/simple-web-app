@@ -208,3 +208,19 @@ def test_cli_tui_and_browse_alias(tmp_home, monkeypatch):
 
 def test_topics_fixture_sanity():
     assert TOPICS["topics"][0]["final_score"] == 4.0
+
+
+@pytest.mark.parametrize("size", [(100, 30), (80, 24)])
+async def test_modal_draws_cleanly_over_the_background(home_with_runs, size):  # extras E3
+    home, _, _ = home_with_runs
+    async with EngineRoom(home).run_test(size=size) as pilot:
+        await pilot.pause()
+        pilot.app.screen.query_one("#exchanges").focus()
+        await pilot.press("enter")
+        await pilot.pause()
+        lines = [ln for ln in screen_text(pilot.app).splitlines() if ln.strip()]
+        right_edges = {len(ln.rstrip()) for ln in lines}
+        left_edges = {len(ln) - len(ln.lstrip()) for ln in lines}
+        # one frame, one column on each side: no orphan border glyphs of the background screen
+        assert len(right_edges) == 1 and len(left_edges) == 1, (right_edges, left_edges)
+        assert lines[0].lstrip().startswith("╭") and lines[-1].lstrip().startswith("╰")

@@ -91,7 +91,7 @@ async def test_score_cluster_computes_final_in_code(ctx):
     assert t.id == signal_id(None, "Fuel|a1")
     assert t.final_score == weighted_score(t.scores, ctx.config.weights) == 3.55
     assert t.why_now == "CPI out Friday" and t.category == "personal_finance"
-    assert "Fuel" in seen[0] and "a1 | news" in seen[0]
+    assert "Fuel" in seen[0] and "S1 | news" in seen[0]
 
 
 def test_score_prompt_has_primer_and_rubric():

@@ -1,6 +1,7 @@
 """Cached, retrying HTTP fetch."""
 
 import time
+from contextvars import ContextVar
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlsplit
@@ -82,6 +83,11 @@ async def _retry_with_intermediate(
         ) from exc
 
 
+# Per-source request tally: radar sets a fresh dict around each adapter (each runs in its own
+# asyncio task, so concurrent adapters never mix); `fetch` adds one call (and one hit) to it.
+HTTP_TALLY: ContextVar[dict[str, int] | None] = ContextVar("http_tally", default=None)
+
+
 async def fetch(
     url: str,
     *,
@@ -102,6 +108,10 @@ async def fetch(
         error = str(exc) or type(exc).__name__
         raise
     finally:
+        tally = HTTP_TALLY.get()
+        if tally is not None:
+            tally["http"] = tally.get("http", 0) + 1
+            tally["cache_hits"] = tally.get("cache_hits", 0) + bool(info["from_cache"])
         if tracer is not None:
             tracer.record(
                 TraceEvent(

@@ -44,7 +44,7 @@ DataTable > .datatable--header { background: #181b21; color: #7d8594; text-style
 #source-detail-box { height: 10; padding: 0 1; }
 #test-progress { padding: 0 1; height: 1; }
 
-InspectorScreen, HelpScreen { align: center middle; background: #0c0d10 75%; }
+InspectorScreen, HelpScreen { align: center middle; background: #0c0d10; }
 #inspector { width: 92%; height: 92%; background: #181b21; border: round #7aa2c4; }
 #inspector VerticalScroll { padding: 0 1; }
 #inspector-keys { height: 1; padding: 0 1; color: #7d8594; background: #1b1e25; }

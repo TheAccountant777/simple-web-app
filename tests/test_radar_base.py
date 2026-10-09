@@ -135,3 +135,39 @@ def test_radar_stage_describe():
         collected_at=datetime(2026, 10, 9, tzinfo=UTC),
     )
     assert RadarStage().describe(res) == "0 signals · 2 sources failed"
+
+
+async def test_radar_span_records_http_and_cache_attrs(ctx, respx_mock):
+    import httpx
+
+    from kenya_data_engine.http import fetch
+
+    respx_mock.get("https://a.ke/feed").respond(200, text="hi")
+
+    class Fetching:
+        name = "fetching"
+
+        async def fetch(self, ctx, since):
+            for _ in range(2):  # the second call is a cache hit
+                await fetch(
+                    "https://a.ke/feed",
+                    client=ctx.http,
+                    cache=ctx.cache,
+                    ttl_hours=1,
+                    tracer=ctx.tracer,
+                )
+            return []
+
+    class Quiet:
+        name = "quiet"
+
+        async def fetch(self, ctx, since):
+            return []
+
+    assert isinstance(ctx.http, httpx.AsyncClient)
+    events = []
+    ctx.tracer.subscribe(events.append)
+    await run_radar([Fetching(), Quiet()], ctx, since=T0)
+    tools = {e.name: e.attrs for e in events if e.kind == "tool"}
+    assert tools["fetching"]["http"] == 2 and tools["fetching"]["cache_hits"] == 1
+    assert tools["quiet"]["http"] == 0 and tools["quiet"]["cache_hits"] == 0

@@ -59,6 +59,7 @@ def make_run(
     bad_line: bool = False,
     radar_ms: int = 400,
     kenya_ok: bool = True,
+    kenya_cached: bool = False,
 ) -> RunHandle:
     path = runs_dir / run_id
     path.mkdir(parents=True)
@@ -68,10 +69,33 @@ def make_run(
         for i in range(2)
     ]
     events += [
-        ev("tool", "radar", "kenya_news", ts=t0, latency=300, attrs={"signals": 7})
+        ev(
+            "tool",
+            "radar",
+            "kenya_news",
+            ts=t0,
+            latency=5 if kenya_cached else 300,
+            attrs={"signals": 7, "http": 2, "cache_hits": 2 if kenya_cached else 0},
+        )
         if kenya_ok
-        else ev("tool", "radar", "kenya_news", ts=t0, latency=900, status="error", error="timeout"),
-        ev("tool", "radar", "cbk", ts=t0, latency=200, attrs={"signals": 3}),
+        else ev(
+            "tool",
+            "radar",
+            "kenya_news",
+            ts=t0,
+            latency=900,
+            status="error",
+            error="timeout",
+            attrs={"http": 1, "cache_hits": 0},
+        ),
+        ev(
+            "tool",
+            "radar",
+            "cbk",
+            ts=t0,
+            latency=200,
+            attrs={"signals": 3, "http": 2, "cache_hits": 1},
+        ),
         ev("stage", "radar", "radar", ts=t0, latency=radar_ms),
         ev(
             "llm",

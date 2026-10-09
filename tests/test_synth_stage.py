@@ -37,7 +37,9 @@ def stage_model(n, scorer):
         if prompt.startswith("Signals:"):
             return ClusterOutput(
                 clusters=[
-                    Cluster(title=f"C{i}", summary="s", category="economy", signal_ids=[f"s{i}"])
+                    Cluster(
+                        title=f"C{i}", summary="s", category="economy", signal_ids=[f"S{i + 1}"]
+                    )
                     for i in range(n)
                 ]
             )

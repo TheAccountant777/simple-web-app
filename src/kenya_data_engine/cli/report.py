@@ -13,7 +13,13 @@ from rich.text import Text
 from kenya_data_engine.cli.common import get_state, guarded
 from kenya_data_engine.cli.ui import badge, console
 from kenya_data_engine.config import load_config
-from kenya_data_engine.report import Aggregate, RunMetrics, build_report, load_run_metrics
+from kenya_data_engine.report import (
+    Aggregate,
+    RunMetrics,
+    build_report,
+    enabled_source_names,
+    load_run_metrics,
+)
 from kenya_data_engine.runs import RunStore
 
 _BARS = "▁▂▃▄▅▆▇█"
@@ -29,6 +35,11 @@ def sparkline(values: list[float]) -> str:
 
 def _secs(ms: int) -> str:
     return f"{ms / 1000:.1f}s"
+
+
+def latency_label(ms: int | None) -> str:
+    """Live mean latency; a source answered only from cache has none to show."""
+    return "cached" if ms is None else _secs(ms)
 
 
 def _table(title: str, *cols: str) -> Table:
@@ -56,7 +67,7 @@ def run_view(m: RunMetrics) -> list[Panel | Table]:
         sources.add_row(
             src.name,
             badge(src.status),
-            _secs(src.latency_ms),
+            "cached" if src.cached else _secs(src.latency_ms),
             "-" if src.signals is None else str(src.signals),
             src.error or "",
         )
@@ -82,9 +93,15 @@ def aggregate_view(agg: Aggregate) -> list[Panel | Table | Text]:
     stages = _table("Stage timings", "Stage", "p50", "p95")
     for name, p50 in agg.stage_p50_ms.items():
         stages.add_row(name, _secs(p50), _secs(agg.stage_p95_ms[name]))
-    sources = _table("Source reliability", "Source", "Success", "Mean latency")
+    sources = _table("Source reliability", "Source", "Success", "Live latency", "Cache")
     for name, rate in sorted(agg.source_success_rate.items(), key=lambda kv: kv[1]):
-        sources.add_row(name, f"{rate:.0%}", _secs(agg.source_mean_latency_ms[name]))
+        share = agg.source_cache_share.get(name)
+        sources.add_row(
+            name,
+            f"{rate:.0%}",
+            latency_label(agg.source_mean_latency_ms.get(name)),
+            "-" if share is None else f"{share:.0%}",
+        )
     cost = [c for _, c in agg.cost_per_run]
     dur = [d for _, d in agg.duration_per_run]
     mean_rate = agg.mean_cache_hit_rate
@@ -142,7 +159,7 @@ def report(
         return
     budget = load_config(state.home).budgets.run_usd
     runs = [load_run_metrics(store.open(i), budget) for i in reversed(ids)]  # oldest first
-    agg = build_report(runs)
+    agg = build_report(runs, only=enabled_source_names(state.home))
     if json_out:
         payload = {
             "runs": [r.model_dump(mode="json") for r in runs],
