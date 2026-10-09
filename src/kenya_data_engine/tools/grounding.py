@@ -3,8 +3,6 @@
 import re
 import unicodedata
 
-from rapidfuzz import fuzz
-
 _TRANSLATE = {
     0x2018: "'",
     0x2019: "'",
@@ -13,8 +11,8 @@ _TRANSLATE = {
     0x2013: "-",
     0x2014: "-",
 }
-MIN_FUZZY_LEN = 20
 _NUMBER = re.compile(r"\d+(?:[.,]\d+)*%?")
+_PUNCT = re.compile(r"(?<!\d)[^\w\s%]|[^\w\s%](?!\d)")
 
 
 def _has_number(n: str, text: str) -> bool:
@@ -28,15 +26,17 @@ def normalize(s: str) -> str:
     return re.sub(r"\s+", " ", s).strip()
 
 
-def quote_in_text(quote: str, text: str, threshold: float = 0.9) -> bool:
-    q = normalize(quote)
+def _squash(s: str) -> str:
+    """Normalise, then drop punctuation (keeping `.`/`,` inside numbers and `%`)."""
+    return re.sub(r"\s+", " ", _PUNCT.sub(" ", normalize(s))).strip()
+
+
+def quote_in_text(quote: str, text: str) -> bool:
+    """Exact match after normalising case, whitespace, typography and punctuation."""
+    q = _squash(quote)
     if not q:
         return False
-    t = normalize(text)
+    t = _squash(text)
     if any(not _has_number(n, t) for n in _NUMBER.findall(q)):
         return False
-    if q in t:
-        return True
-    if len(q) < MIN_FUZZY_LEN or len(t) < len(q):
-        return False
-    return bool(fuzz.partial_ratio(q, t) >= threshold * 100)
+    return q in t

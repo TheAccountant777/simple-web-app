@@ -121,7 +121,7 @@ Each source is an adapter implementing `fetch(since: datetime) -> list[Signal]`.
 - **Input:** one `Topic`. Topics run in parallel, with a concurrency limit from config.
 - **Tools:** `web_search`, `site_search`, `fetch_page`, `read_pdf`, `memory_lookup`, `submit_brief`.
 - **Behaviour:** the agent investigates what's being said, what's misunderstood and what data exists. It then calls `submit_brief` with a `ResearchBrief`.
-- **Grounding:** each `Claim` must include a verbatim `quote` from a page fetched during the session. Code checks the quote against the cached page text (normalised whitespace and case, with fuzzy match ≥ 0.9). Ungrounded claims are dropped, and the count is recorded.
+- **Grounding:** each `Claim` must include a verbatim `quote` from a page fetched during the session. Code checks the quote against the cached page text (exact match after normalising case, whitespace, typography and punctuation; no fuzzy matching). Ungrounded claims are dropped, and the count is recorded.
 - **Budgets:** about 15 tool calls, a token cap and a cost cap per topic (all configurable).
 - **Reasoning effort:** high.
 - **Failure handling:** a schema-invalid submission gets one repair turn. If it is still invalid, or the budget is exhausted, the topic is marked failed, which is recorded and the run continues.
