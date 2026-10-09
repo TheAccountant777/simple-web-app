@@ -121,3 +121,22 @@ def test_today_nairobi_crosses_midnight():
     assert today_nairobi(datetime(2026, 10, 3, 22, 0)) == date(2026, 10, 4)
     assert today_nairobi(datetime(2026, 10, 3, 22, 0, tzinfo=NAIROBI)) == date(2026, 10, 3)
     assert isinstance(today_nairobi(), date)
+
+
+@pytest.mark.parametrize(
+    "text", ["0000", "0000-05", "9999", "0000-01-01", "Q1 0000", "Jan 0000", "0000/01"]
+)
+def test_year_edges_return_none(text):
+    assert parse_period(text) is None
+    assert parse_period(text, hint="fy") is None
+    assert parse_period(text, hint="epra_cycle") is None
+
+
+def test_date_edges_return_none():
+    assert parse_period("9999-12-31", hint="epra_cycle") is None
+    assert parse_period("0001-01-01", hint="epra_cycle") is None
+
+
+def test_century_wrap():
+    p = parse_period("2099/00")
+    assert p is not None and p.label == "FY2099/00" and p.end == date(2100, 6, 30)

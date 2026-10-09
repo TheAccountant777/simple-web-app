@@ -116,8 +116,19 @@ def _from_date(d: date, hint: PeriodType | None) -> Period:
     return day(d)
 
 
+def _year_ok(y: int) -> bool:
+    return 1 <= y <= 9998  # fy() and month ends need y + 1 to be representable
+
+
 def parse_period(text: str, hint: PeriodType | None = None) -> Period | None:
     """Parse a period label; `hint` only disambiguates (a bare year as FY, a date as cycle)."""
+    try:
+        return _parse(text, hint)
+    except (ValueError, OverflowError):  # out-of-range years at the edges of `date`
+        return None
+
+
+def _parse(text: str, hint: PeriodType | None) -> Period | None:
     s = text.strip()
     if m := _EPRA.fullmatch(s):
         d = _safe_date(*(int(p) for p in m[1].split("-")))
@@ -131,16 +142,21 @@ def parse_period(text: str, hint: PeriodType | None = None) -> Period | None:
         except ValueError:
             return None
     if m := (_ISO_MONTH.fullmatch(s) or _M_FORM.fullmatch(s)):
-        return month(int(m[1]), int(m[2])) if 1 <= int(m[2]) <= 12 else None
+        return month(int(m[1]), int(m[2])) if 1 <= int(m[2]) <= 12 and _year_ok(int(m[1])) else None
     if m := _QUARTER.fullmatch(s):
-        return quarter(int(m[2] or m[3]), int(m[1] or m[4]))
+        y = int(m[2] or m[3])
+        return quarter(y, int(m[1] or m[4])) if _year_ok(y) else None
     if m := _FY.fullmatch(s):
         start, end = int(m[1]), m[2]
         end_full = int(end) if len(end) == 4 else (start // 100) * 100 + int(end)
-        return fy(start) if end_full == start + 1 else None
+        if len(end) == 2 and end_full < start:
+            end_full += 100  # century wrap: 2099/00
+        return fy(start) if end_full == start + 1 and _year_ok(start) else None
     if m := _NAME_MONTH.fullmatch(s):
         mon = _MONTHS.get(m[1].lower())
-        return month(int(m[2]), mon) if mon else None
+        return month(int(m[2]), mon) if mon and _year_ok(int(m[2])) else None
     if _YEAR.fullmatch(s):
+        if not _year_ok(int(s)):
+            return None
         return fy(int(s)) if hint == "fy" else year(int(s))
     return None

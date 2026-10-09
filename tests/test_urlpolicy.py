@@ -169,3 +169,11 @@ def test_sniff_types():
     assert sniff("KSh,é\n1,2".encode()) == "csv"
     assert sniff(b"\x89PNG\xff\xfe\x00\x00") == "unknown"
     assert sniff(b"") == "unknown"
+
+
+async def test_rejects_cgnat_and_malformed():
+    with pytest.raises(UnsafeUrl):
+        await check_url("https://a.ke/x", resolver("100.64.1.1"))
+    for bad in ["http://[::1", "http://a.ke:99999/x", "http://a.ke:abc/x"]:
+        with pytest.raises(UnsafeUrl):
+            await check_url(bad, resolver("41.89.10.10"))

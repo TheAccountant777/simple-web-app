@@ -9,6 +9,8 @@ from io import BytesIO
 from typing import Literal
 from urllib.parse import urlsplit
 
+import httpx
+
 from kenya_data_engine.errors import FetchError
 
 
@@ -29,7 +31,7 @@ async def _system_resolve(host: str) -> list[str]:
 def _is_global(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
         ip = ip.ipv4_mapped
-    return not (
+    return ip.is_global and not (
         ip.is_private
         or ip.is_loopback
         or ip.is_link_local
@@ -41,12 +43,19 @@ def _is_global(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
 
 async def check_url(url: str, resolve: Resolver | None = None) -> None:
     """Raise UnsafeUrl unless `url` is http(s), has no userinfo and resolves only to global IPs."""
-    parts = urlsplit(url)
+    try:
+        parts = urlsplit(url)
+        parts.port  # noqa: B018 - validates the port
+        target = httpx.URL(url)  # the parser the request will use; the two must agree
+    except (ValueError, httpx.InvalidURL) as exc:
+        raise UnsafeUrl(f"malformed URL: {exc}") from exc
     if parts.scheme not in ("http", "https"):
         raise UnsafeUrl(f"unsupported URL scheme {parts.scheme!r}: {url}")
-    if parts.username is not None or parts.password is not None:
-        raise UnsafeUrl(f"URL contains credentials: {parts.scheme}://{parts.hostname}/...")
-    host = parts.hostname
+    if parts.username is not None or parts.password is not None or target.userinfo:
+        raise UnsafeUrl(f"URL contains credentials: {parts.scheme}://{target.host}/...")
+    host = target.host
+    if host != (parts.hostname or "").lower():
+        raise UnsafeUrl(f"URL host is ambiguous: {url}")
     if not host:
         raise UnsafeUrl(f"URL has no host: {url}")
     try:

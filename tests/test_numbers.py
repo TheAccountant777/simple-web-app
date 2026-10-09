@@ -76,3 +76,12 @@ def test_same_number():
     assert c and d and not same_number(c, d)
     e = parse_number("9.5")
     assert c and e and not same_number(c, e)
+
+
+def test_scale_attachment_rules():
+    assert [(n.value, n.scale) for n in find_numbers("5 m tall")] == [(Decimal("5"), 0)]
+    assert [n.value for n in find_numbers("5m and 2k")] == [Decimal("5000000"), Decimal("2000")]
+    n = parse_number("Sh 1.2 bn")
+    assert n is not None and n.value == Decimal("1200000000") and n.unit == "KES"
+    assert parse_number("5 m") is None
+    assert [n.value for n in find_numbers("3 b profit")] == [Decimal("3")]

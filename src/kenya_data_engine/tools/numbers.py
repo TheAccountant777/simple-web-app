@@ -47,7 +47,7 @@ _NUMBER = re.compile(
     (?:(?P<cur>US\$|\$|KES|Kshs|KSh|Shs|Sh)(?![A-Za-z])\s*)?
     (?P<neg2>(?<![\w.])[{_DASH}])?
     (?P<num>\d{{1,3}}(?:,\d{{3}})+(?:\.\d+)?|\d+(?:\.\d+)?|\.\d+)
-    (?:\s*(?P<scale>thousand|million|billion|trillion|mn|bn|tn|k|m|b)(?![A-Za-z]))?
+    (?:(?:\s*(?P<scale>thousand|million|billion|trillion|mn|bn|tn)|(?P<scale1>[kmb]))(?![A-Za-z]))?
     (?:\s*(?P<suf>%|per\s*cent|percent|shillings?|shs|bob)(?![A-Za-z]))?
     (?P<close>\))?
     """,
@@ -66,7 +66,8 @@ def _build(m: re.Match[str], *, parens: bool) -> ParsedNumber | None:
     if bool(m["open"]) != bool(m["close"]) and parens:
         return None
     negative = bool(m["neg1"] or m["neg2"]) or (parens and bool(m["open"] and m["close"]))
-    scale = _SCALE[m["scale"].lower()] if m["scale"] else 0
+    word = m["scale"] or m["scale1"]
+    scale = _SCALE[word.lower()] if word else 0
     value = Decimal(m["num"].replace(",", "")) * (Decimal(10) ** scale)
     unit: Unit = "none"
     if m["cur"]:

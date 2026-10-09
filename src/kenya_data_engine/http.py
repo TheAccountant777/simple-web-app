@@ -66,6 +66,13 @@ class _ChainError(Exception):
 
 
 _REDIRECTS = {301, 302, 303, 307, 308}
+_WIRE_HEADERS = {"content-encoding", "content-length", "transfer-encoding"}
+_CREDENTIAL_HEADERS = {"authorization", "cookie"}
+
+
+def _origin(url: str) -> tuple[str, str, int | None]:
+    u = httpx.URL(url)
+    return (u.scheme, u.host, u.port)  # port is None when default; scheme disambiguates
 
 
 async def _get_checked(
@@ -74,10 +81,14 @@ async def _get_checked(
     """GET following redirects by hand: check every hop, cap the body size."""
     resolve: Resolver | None = policy.resolve
     current = url
+    origin = _origin(url)
+    send = headers
     for _ in range(policy.max_redirects + 1):
         await check_url(current, resolve)
+        if _origin(current) != origin:  # never leak credentials across origins
+            send = {k: v for k, v in headers.items() if k.lower() not in _CREDENTIAL_HEADERS}
         async with client.stream(
-            "GET", current, headers=headers, timeout=TIMEOUT_S, follow_redirects=False
+            "GET", current, headers=send, timeout=TIMEOUT_S, follow_redirects=False
         ) as resp:
             location = resp.headers.get("location")
             if resp.status_code in _REDIRECTS and location:
@@ -95,8 +106,10 @@ async def _get_checked(
                     raise FetchError(
                         f"response too large for {current} (> {policy.max_bytes} bytes)"
                     )
+            # aiter_bytes already decoded the body: drop the headers that describe the wire form.
+            kept = [(k, v) for k, v in resp.headers.multi_items() if k.lower() not in _WIRE_HEADERS]
             return httpx.Response(
-                resp.status_code, headers=resp.headers, content=bytes(body), request=resp.request
+                resp.status_code, headers=kept, content=bytes(body), request=resp.request
             )
     raise FetchError(f"too many redirects (> {policy.max_redirects}) for {url}")
 
@@ -198,6 +211,12 @@ async def _fetch(
     key = normalize_url(url)
     hit = cache.get(key)
     if hit is not None:
+        if policy is not None:
+            await check_url(url, policy.resolve)
+            if len(hit.content) > policy.max_bytes:
+                raise FetchError(
+                    f"cached response too large for {url} (> {policy.max_bytes} bytes)"
+                )
         info.update(status=200, from_cache=True, bytes=len(hit.content))
         return FetchResult(
             url=url, status=200, content=hit.content, content_type=hit.content_type, from_cache=True

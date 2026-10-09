@@ -112,3 +112,95 @@ async def test_http_tally_counts_calls_and_cache_hits(respx_mock, cache):
     finally:
         HTTP_TALLY.reset(token)
     assert tally == {"http": 2, "cache_hits": 1}
+
+
+# ---- policy fetches -------------------------------------------------------------------------
+import gzip  # noqa: E402
+
+from kenya_data_engine.http import FetchPolicy  # noqa: E402
+from kenya_data_engine.tools.urlpolicy import UnsafeUrl  # noqa: E402
+
+
+def _policy(max_bytes: int = 1000, **kw) -> FetchPolicy:
+    async def resolve(host: str) -> list[str]:
+        return ["41.89.10.10"]
+
+    return FetchPolicy(max_bytes=max_bytes, resolve=resolve, **kw)
+
+
+async def test_policy_gzip_body_decodes(respx_mock, cache):
+    body = b"hello gzip " * 20
+    respx_mock.get("https://a.ke/z").respond(
+        200, content=gzip.compress(body), headers={"content-encoding": "gzip"}
+    )
+    async with httpx.AsyncClient() as c:
+        r = await fetch("https://a.ke/z", client=c, cache=cache, ttl_hours=1, policy=_policy())
+    assert r.content == body
+
+
+async def test_policy_cache_hit_is_checked(cache):
+    cache.put("https://a.ke/x", b"x" * 50, "text/plain", 1)
+    async with httpx.AsyncClient() as c:
+        r = await fetch("https://a.ke/x", client=c, cache=cache, ttl_hours=1, policy=_policy())
+        assert r.from_cache
+        with pytest.raises(FetchError, match="too large"):
+            await fetch(
+                "https://a.ke/x", client=c, cache=cache, ttl_hours=1, policy=_policy(max_bytes=10)
+            )
+    cache.put("http://127.0.0.1/x", b"secret", "text/plain", 1)
+    async with httpx.AsyncClient() as c:
+        with pytest.raises(UnsafeUrl):
+            await fetch("http://127.0.0.1/x", client=c, cache=cache, ttl_hours=1, policy=_policy())
+
+
+async def test_cross_origin_redirect_drops_credentials(respx_mock, cache):
+    respx_mock.get("https://a.ke/x").respond(302, headers={"location": "https://b.ke/y"})
+    respx_mock.get("https://b.ke/y").respond(200, text="ok")
+    hdrs = {"Authorization": "Bearer t", "Cookie": "s=1", "X-Other": "keep"}
+    async with httpx.AsyncClient() as c:
+        await fetch(
+            "https://a.ke/x", client=c, cache=cache, ttl_hours=1, headers=hdrs, policy=_policy()
+        )
+    first, second = (call.request.headers for call in respx_mock.calls)
+    assert first["authorization"] == "Bearer t" and first["cookie"] == "s=1"
+    assert "authorization" not in second and "cookie" not in second
+    assert second["x-other"] == "keep"
+
+
+async def test_same_origin_redirect_keeps_credentials(respx_mock, cache):
+    respx_mock.get("https://a.ke/x").respond(302, headers={"location": "/y"})
+    respx_mock.get("https://a.ke/y").respond(200, text="ok")
+    async with httpx.AsyncClient() as c:
+        await fetch(
+            "https://a.ke/x",
+            client=c,
+            cache=cache,
+            ttl_hours=1,
+            headers={"Authorization": "Bearer t"},
+            policy=_policy(),
+        )
+    assert respx_mock.calls[1].request.headers["authorization"] == "Bearer t"
+
+
+async def test_policy_chain_error_uses_aia_client(respx_mock, cache):
+    chain_err = httpx.ConnectError(
+        "[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer"
+    )
+    respx_mock.get("https://a.ke/x").mock(side_effect=[chain_err, httpx.Response(200, text="ok")])
+    used = []
+
+    class FakeAia:
+        async def client_for(self, url: str) -> httpx.AsyncClient:
+            used.append(url)
+            return httpx.AsyncClient()
+
+    async with httpx.AsyncClient() as c:
+        r = await fetch(
+            "https://a.ke/x",
+            client=c,
+            cache=cache,
+            ttl_hours=1,
+            aia=FakeAia(),  # type: ignore[arg-type]
+            policy=_policy(),
+        )
+    assert r.content == b"ok" and used == ["https://a.ke/x"]
