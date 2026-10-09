@@ -93,3 +93,15 @@ def test_build_adapters_respects_enabled(ctx):
     assert [a.name for a in build_adapters(cfg, ctx.home)] == ["google_trends"]
     cfg.radar.enabled = []
     assert build_adapters(cfg, ctx.home) == []
+
+
+async def test_adapter_error_message_is_redacted(ctx):
+    class LeakyAdapter:
+        name = "leaky"
+
+        async def fetch(self, ctx, since):
+            raise RuntimeError("GET https://x.ke/?k=fake-tavily failed with fake-deepseek")
+
+    res = await run_radar([LeakyAdapter()], ctx, since=T0)
+    msg = res.errors[0].message
+    assert "fake-tavily" not in msg and "fake-deepseek" not in msg and "***" in msg

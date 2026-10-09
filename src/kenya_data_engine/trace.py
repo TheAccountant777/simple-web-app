@@ -67,6 +67,11 @@ class Tracer:
         self.total_cost = 0.0
         self._events: list[TraceEvent] = []
 
+    def redact(self, text: str) -> str:
+        """Mask configured secret values in free text."""
+        out: str = _redact(text, self._secrets)
+        return out
+
     @property
     def remaining_usd(self) -> float:
         return self.run_budget_usd - self.total_cost

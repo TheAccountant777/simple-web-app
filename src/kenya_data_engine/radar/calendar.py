@@ -9,6 +9,7 @@ from typing import Any
 import yaml
 
 from kenya_data_engine.context import RunContext
+from kenya_data_engine.errors import ConfigError
 from kenya_data_engine.models import Signal, signal_id
 
 
@@ -64,12 +65,20 @@ class CalendarAdapter:
                 .joinpath("defaults/calendar.yaml")
                 .read_text(encoding="utf-8")
             )
+        where = str(self.path) if self.path.exists() else "defaults/calendar.yaml"
         try:
             data = yaml.safe_load(text)
-        except yaml.YAMLError:
+        except yaml.YAMLError as exc:
+            raise ConfigError(f"invalid YAML in {where}", hint=str(exc)) from exc
+        if data is None:
             return []
         events = data.get("events") if isinstance(data, dict) else None
-        return [e for e in events if isinstance(e, dict)] if isinstance(events, list) else []
+        if not isinstance(data, dict) or ("events" in data and not isinstance(events, list)):
+            raise ConfigError(
+                f"{where} must contain an `events:` list",
+                hint="see the packaged calendar.yaml for the format (`engine init --force`)",
+            )
+        return [e for e in events or [] if isinstance(e, dict)]
 
     async def fetch(self, ctx: RunContext, since: datetime) -> list[Signal]:
         today = datetime.now(UTC).date()

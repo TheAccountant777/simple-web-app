@@ -45,7 +45,9 @@ async def run_radar(adapters: list[Adapter], ctx: RunContext, since: datetime) -
             async with ctx.tracer.span("radar", "tool", adapter.name):
                 return await adapter.fetch(ctx, since)
         except Exception as exc:
-            return AdapterError(adapter=adapter.name, message=str(exc) or type(exc).__name__)
+            return AdapterError(
+                adapter=adapter.name, message=ctx.tracer.redact(str(exc) or type(exc).__name__)
+            )
 
     results = await asyncio.gather(*(one(a) for a in adapters))
     signals: list[Signal] = []

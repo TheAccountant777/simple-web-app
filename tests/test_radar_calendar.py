@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from kenya_data_engine.errors import ConfigError
 from kenya_data_engine.radar.calendar import CalendarAdapter, occurrences
 
 T0 = datetime(2000, 1, 1, tzinfo=UTC)
@@ -60,8 +61,16 @@ async def test_calendar_missing_file_uses_packaged_defaults(tmp_path, ctx):
     assert all(s.meta["note"] is not None for s in sigs)
 
 
-@pytest.mark.parametrize("content", ["", "events: nope\n", "- a\n"])
-async def test_calendar_bad_file_yields_nothing(tmp_path, ctx, content):
+async def test_calendar_empty_file_yields_nothing(tmp_path, ctx):
+    p = tmp_path / "c.yaml"
+    p.write_text("")
+    assert await CalendarAdapter(p, 21).fetch(ctx, T0) == []
+
+
+@pytest.mark.parametrize("content", ["events: nope\n", "- a\n", "events: [unclosed\n"])
+async def test_calendar_malformed_file_raises_config_error(tmp_path, ctx, content):
     p = tmp_path / "c.yaml"
     p.write_text(content)
-    assert await CalendarAdapter(p, 21).fetch(ctx, T0) == []
+    with pytest.raises(ConfigError) as ei:
+        await CalendarAdapter(p, 21).fetch(ctx, T0)
+    assert ei.value.hint
