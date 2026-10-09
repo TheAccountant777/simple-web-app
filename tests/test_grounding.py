@@ -1,0 +1,32 @@
+from kenya_data_engine.tools.grounding import normalize, quote_in_text
+
+
+def test_normalize():
+    assert normalize("  \u201cHi\u201d\u2014 \u2018x\u2019\n\tA\u2013B ") == "\"hi\"- 'x' a-b"
+
+
+def test_grounding_tolerates_typography():
+    assert quote_in_text("inflation rose to “4.4%” — KNBS", 'Inflation rose to "4.4%" - KNBS said')
+
+
+def test_grounding_rejects_short_fuzzy():
+    assert not quote_in_text("rate cut", "rates were held")
+
+
+def test_grounding_rejects_fabricated_long_quote():
+    assert not quote_in_text(
+        "the central bank cut the rate to 7 percent",
+        "the central bank held the rate at 9 percent citing inflation",
+    )
+
+
+def test_grounding_fuzzy_accepts_near_match_long_quote():
+    assert quote_in_text(
+        "the central bank held the rate at 9 percent, citing inflation",
+        "Today the central bank held the rate at 9 percent citing inflation pressures.",
+    )
+
+
+def test_empty_quote_false():
+    assert not quote_in_text("", "anything")
+    assert not quote_in_text("   ", "anything")
