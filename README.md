@@ -53,8 +53,8 @@ engine stage synthesize --input ./signals.json     # score a signals file
 
 ### `engine doctor`
 
-Live health checks, grouped: API keys, the LLM (`GET /models`), web search (one query), and each
-enabled Radar source. Exits 1 if any check fails.
+Live health checks, grouped: API keys, the LLM (`GET /models`), web search (one query), config
+warnings, and each enabled Radar source (with consecutive failures). Exits 1 if any check fails.
 
 ```
 engine doctor
@@ -63,23 +63,43 @@ engine doctor --json
 
 ### `engine init`
 
-Creates the home, copies `config.yaml` and `calendar.yaml` if absent, asks for your keys, verifies
-the DeepSeek key, then runs doctor.
+Creates the home, writes a short override-only `config.yaml`, a commented `sources.yaml` template
+and a full `calendar.yaml` (each only if absent), asks for your keys, verifies the DeepSeek key,
+then runs doctor.
 
 ```
 engine init                  # interactive; Enter keeps a saved key
 engine init --force         # also overwrite config.yaml and calendar.yaml
+engine init --reset-config  # back up config.yaml to config.yaml.bak-<timestamp>, write a fresh short one
 engine init --no-verify     # skip the key check and doctor (offline)
 DEEPSEEK_API_KEY=... TAVILY_API_KEY=... engine init --non-interactive
 ```
+
+### `engine sources`
+
+For auditing the Radar source list (see [Sources](#sources)).
+
+```
+engine sources list [--json]                 # name, type, kind, enabled, health
+engine sources test <name> [--json]          # live fetch (cache bypassed) of one source
+engine sources test --all [--json]           # every enabled source
+```
+
+`test` shows status, latency, item count and the first 5 extracted items (`title | date | link`),
+or the exact error with a hint. It exits 0 only if every tested source returned items, and
+`--json` output has a stable shape for scripts.
 
 ## Where things live
 
 Default home: `~/.kenya-data-engine/` (override with `--home` or `ENGINE_HOME`).
 
 ```
-config.yaml   calendar.yaml   .env   engine.db   runs/<YYYY-MM-DD-HHMM>/   briefs/
+config.yaml   sources.yaml   calendar.yaml   .env   engine.db   certs/   runs/<YYYY-MM-DD-HHMM>/   briefs/
 ```
+
+`certs/` caches intermediate certificates the engine downloaded for servers with an incomplete TLS
+chain (see [Troubleshooting](#troubleshooting)). `engine.db` also holds the HTTP cache and the
+per-source health table.
 
 Each run directory holds `signals.json` (Radar), `topics.json` (Synthesize), `trace.jsonl` (every
 span and LLM call with tokens and cost) and `summary.json`. A truncated or corrupt artifact counts
@@ -88,7 +108,9 @@ as missing, so `--resume` simply re-runs that stage.
 ## Configuration
 
 `~/.kenya-data-engine/config.yaml` is deep-merged over the packaged defaults, so you only write
-the keys you want to change.
+the keys you want to change. `engine init` creates it as a short, commented file: **put overrides
+there, not a copy of the defaults**, so new defaults reach you when you update. Radar sources are
+configured separately in `sources.yaml`.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -105,22 +127,54 @@ the keys you want to change.
 | `radar.since_hours` | `72` | Look-back window for news and releases |
 | `radar.lookahead_days` | `21` | How far ahead calendar events are listed |
 | `radar.max_items` | `10` | Items taken per listing page |
-| `radar.feeds` | six Kenyan outlets | Name to RSS URL map |
-| `radar.trends_feed` | Google Trends KE | RSS URL for search attention |
-| `radar.listings` | CBK, KNBS, EPRA, Parliament | Name to listing-page spec (CSS selectors) |
-| `radar.enabled` | all of the above plus `calendar` | Which sources run |
+| `radar.source_timeout_s` | `20` | Per-source timeout; a slow source fails alone |
 
-### Add an RSS feed
+## Sources
+
+Radar sources live in `defaults/sources.yaml` (packaged) and your optional
+`~/.kenya-data-engine/sources.yaml`. One self-contained entry per source, keyed by name:
 
 ```yaml
-radar:
-  feeds:
-    my_outlet: https://example.co.ke/rss
+cbk_news:
+  type: listing                  # rss | listing  (Google Trends is rss with kind: attention)
+  url: https://www.centralbank.go.ke/news/
+  kind: policy                   # news | data_release | policy | attention
+  enabled: true                  # default true
+  user_agent: "..."              # optional per-source User-Agent
+  item: "article.post, div.news-item"   # listing only: CSS selectors; date may be null
+  title: "h2.entry-title a, h3 a"
+  link: "h2.entry-title a, h3 a"
+  date: "span.entry-date, time"
+  notes: "agent-sourced, unverified until `engine doctor` passes live"
 ```
 
-Maps are deep-merged with the defaults, so your feed runs alongside the built-in ones as long as
-`rss` is in `radar.enabled`. Lists such as `radar.enabled` are replaced, not merged: to run only
-some sources, write the full list you want (for example `enabled: [calendar, cbk]`).
+Comma lists in selectors are intentional unions. A listing takes the first `<a>` with an `href`
+inside each item and skips items with no title or link. A listing whose `item` selector matches
+nothing fails with `selector matched nothing`: that is how layout drift shows up.
+
+**Merge rule.** Your `sources.yaml` is merged over the packaged one **by name, field by field**.
+So you can fix one selector (`cbk_news: {title: "h1 a"}`), switch a source off
+(`nation: {enabled: false}`), or add a new source without copying the list. Every merged entry is
+validated; an invalid one is reported as a failed source (in `engine doctor` and in run warnings)
+and skipped. It never aborts the run, and neither do timeouts, empty results or bad selectors in
+other sources. The calendar is its own adapter (`calendar.yaml`).
+
+**Health.** After every run and probe, `engine.db` records per source: `last_ok_at`, `last_error`,
+`consecutive_failures`, `last_signal_count`. `engine sources list` and `engine doctor` show it.
+
+**Audit loop** (for people and for other agents):
+
+1. `engine sources list --json` to find failing or never-run sources.
+2. Edit `~/.kenya-data-engine/sources.yaml` (selector, URL, `enabled: false`, `notes`).
+3. `engine sources test <name>`; repeat 2 and 3 until it extracts the right items.
+4. Put the fix upstream in `src/kenya_data_engine/defaults/sources.yaml` and update `notes`
+   with the verification date.
+
+Sources marked "agent-sourced" in `notes` are unverified until they pass live.
+
+HTTP identity: requests send a browser-like `User-Agent` (some Kenyan WAFs reject others) and an
+`Accept` header; set `user_agent` on a source to override it (`reddit_kenya` ships with a
+Reddit-friendly agent).
 
 ### Add a calendar entry
 
@@ -139,10 +193,18 @@ events:
 A malformed `calendar.yaml` shows up as a failed `calendar` source (in `engine run` and in
 `engine doctor`) with a hint, instead of being silently ignored.
 
-### Fix a listing page
+## Updating
 
-If a site changes its layout, its listing check fails with "selector matched nothing". Adjust
-`radar.listings.<name>` (`item`, `title`, `link`, `date` are CSS selectors) in `config.yaml`.
+```
+uv tool install --reinstall git+https://github.com/TheAccountant777/simple-web-app@claude/loving-hawking-eucp75
+```
+
+Defaults (including the source list) ship with the engine, so an update brings new defaults
+automatically, as long as your `config.yaml` only holds overrides. If you ran an older
+`engine init`, your `config.yaml` is a full copy of the old defaults and pins them: run
+`engine init --reset-config` (it saves the old file as `config.yaml.bak-<timestamp>`), then
+re-apply any overrides you still want. `engine doctor` warns when it finds legacy `radar.*` source
+keys. Your `sources.yaml` and `calendar.yaml` are never touched by an update.
 
 ## Troubleshooting
 
@@ -157,9 +219,13 @@ Every message has a `→` hint. Run `engine doctor` first; this maps each failur
 | `model not listed` (warn) | Change `llm.stages.*.model` in `config.yaml` to a model your account lists |
 | `HTTP 5xx` / transport error on the LLM | DeepSeek or your network is down; retry later |
 | Search fails | Check the Tavily/Serper key and quota; `search.providers` order |
-| A source fails with `selector matched nothing` | The site changed; update `radar.listings.<name>` selectors |
+| A source fails with `selector matched nothing` | The site changed; fix its selectors in `sources.yaml`, check with `engine sources test <name>` |
+| A source fails with `incomplete certificate chain` | The server omits its intermediate certificate. The engine already tries to fetch it (kept in `certs/`) and retries once with verification on; if that fails too, it cannot be fetched automatically. TLS verification is never disabled |
+| `config.yaml` warns about `radar.feeds` / `radar.enabled` (doctor) | Legacy keys no longer apply. Move entries to `sources.yaml` or run `engine init --reset-config` |
+| A source shows `failing ×N` | It has failed N runs in a row; `engine sources test <name>` shows the error |
 | A source fails with a transport error | The site is down or blocked; the run continues without it |
 | A source returns `0 signals` (warn) | Empty feed or nothing in the window; raise `radar.since_hours` |
+| An entry in `sources.yaml` is reported as `invalid source` | Fix the field named in the message |
 | `calendar` fails with `invalid YAML` / `must contain an events: list` | Fix `calendar.yaml`, or `engine init --force` to restore the default |
 | `invalid config` / `weights must sum to 1.0` | Fix `config.yaml` as the hint says |
 | `run budget ... exhausted` | Raise `budgets.run_usd`; unscored clusters are skipped, not lost |
