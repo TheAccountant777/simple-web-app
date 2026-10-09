@@ -1,5 +1,6 @@
 """Figures for satisfied needs: every number a claim may cite is computed here, by code."""
 
+from collections.abc import Callable
 from contextlib import suppress
 
 from pydantic import BaseModel
@@ -8,7 +9,7 @@ from kenya_data_engine.data.csvsafe import write_csv
 from kenya_data_engine.data.models import StoredObservation
 from kenya_data_engine.data.stats import Figure, FigureBook, ref
 from kenya_data_engine.data.store import SeriesStore
-from kenya_data_engine.research.models import DataNeed, FigureRef, NeedStatus
+from kenya_data_engine.research.models import DataNeed, FigureKind, FigureRef, NeedStatus
 
 MAX_ENTITIES = 5
 CSV_HEADER = ["series", "entity", "metric", "period", "value", "unit", "source_url", "vintage"]
@@ -39,24 +40,28 @@ def _entities(rows: list[StoredObservation], need: DataNeed) -> list[str]:
     return names[:MAX_ENTITIES]
 
 
-def _one_group(fbook: FigureBook, obs: list[StoredObservation]) -> list[Figure]:
+def _one_group(fbook: FigureBook, obs: list[StoredObservation]) -> list[tuple[FigureKind, Figure]]:
     """Latest, change, percentage change and year-on-year for one (series, entity, metric)."""
     latest = obs[-1]
     where = f"{latest.entity} {latest.metric}"
-    out: list[Figure] = []
+    out: list[tuple[FigureKind, Figure]] = []
     first = fbook.mean([latest], f"{where} {latest.period.label}")
     first.formula = "value"  # one observation: the mean is the value itself
-    out.append(first)
+    out.append(("latest", first))
     if len(obs) >= 2:
         prev = obs[-2]
         span = f"{prev.period.label} to {latest.period.label}"
-        for make, what in ((fbook.change, "change"), (fbook.pct_change, "% change")):
+        makers: list[tuple[Callable[..., Figure], FigureKind, str]] = [
+            (fbook.change, "change", "change"),
+            (fbook.pct_change, "pct_change", "% change"),
+        ]
+        for make, kind, what in makers:
             try:
-                out.append(make(prev, latest, f"{where} {what} {span}"))
+                out.append((kind, make(prev, latest, f"{where} {what} {span}")))
             except ValueError:
                 continue
     with suppress(ValueError):  # no period a year earlier, or a zero base
-        out.append(fbook.yoy(obs, f"{where} year-on-year to {latest.period.label}"))
+        out.append(("yoy", fbook.yoy(obs, f"{where} year-on-year to {latest.period.label}")))
     return out
 
 
@@ -81,15 +86,22 @@ def figures_for(
         for key in dict.fromkeys(status.series_keys):
             rows = [o for o in store.latest(key) if _in_range(o, need)]
             for entity in _entities(rows, need):
-                for metric in dict.fromkeys(o.metric for o in rows if o.entity == entity):
+                for metric in dict.fromkeys(
+                    o.metric for o in rows if o.entity.strip().lower() == entity.strip().lower()
+                ):
                     obs = sorted(
-                        (o for o in rows if o.entity == entity and o.metric == metric),
+                        (
+                            o
+                            for o in rows
+                            if o.entity.strip().lower() == entity.strip().lower()
+                            and o.metric == metric
+                        ),
                         key=lambda o: o.period.start,
                     )
                     obs = [o for o in obs if o.period.type == obs[-1].period.type]
                     lookup = {ref(o): o for o in obs}
                     latest = obs[-1]
-                    for fig in _one_group(fbook, obs):
+                    for kind, fig in _one_group(fbook, obs):
                         used.update({r: lookup[r] for r in fig.inputs})
                         status.figure_ids.append(fig.id)
                         refs.append(
@@ -102,6 +114,8 @@ def figures_for(
                                 generic=key in generic_series,
                                 tier=tiers_by_series.get(key, 4),
                                 published=latest.provenance.published,
+                                kind=kind,
+                                metric=latest.metric,
                             )
                         )
     rows_out = [

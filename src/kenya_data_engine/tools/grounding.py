@@ -40,3 +40,17 @@ def quote_in_text(quote: str, text: str) -> bool:
     if any(not _has_number(n, t) for n in _NUMBER.findall(q)):
         return False
     return q in t
+
+
+def quote_window(quote: str, text: str, radius: int = 300) -> str | None:
+    """The normalised text within `radius` characters either side of a grounded quote.
+
+    None when the quote is not in the text. The window includes the quote itself.
+    """
+    if not quote_in_text(quote, text):
+        return None
+    q, t = _squash(quote), _squash(text)
+    start = t.find(q)
+    if start < 0:
+        return None
+    return t[max(0, start - radius) : start + len(q) + radius]

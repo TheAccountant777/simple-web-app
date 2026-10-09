@@ -115,3 +115,14 @@ def test_comparisons_csv_header_and_rows(tmp_path):
         ["pump", "Nairobi", "super", "2026-08", "180", "KES/L", "https://epra.go.ke/p", "1"],
         ["pump", "Nairobi", "super", "2026-09", "198", "KES/L", "https://epra.go.ke/p", "1"],
     ]
+
+
+def test_kinds_and_case_insensitive_entities(tmp_path):
+    store = _store(
+        tmp_path,
+        [_obs("pump", "nairobi", 2026, 8, "180"), _obs("pump", "Nairobi", 2026, 9, "198")],
+    )
+    _, pack = figures_for([_need()], [_status()], store, {}, set())
+    assert [(r.kind, r.metric) for r in pack.refs] == [
+        ("latest", "super"), ("change", "super"), ("pct_change", "super"),
+    ]  # fmt: skip

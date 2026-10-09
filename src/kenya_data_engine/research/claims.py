@@ -33,17 +33,36 @@ def claims_instructions(today: date) -> str:
     return load_prompt("claims").replace("{{today}}", today.isoformat())
 
 
-def _format(fig: Figure) -> str:
+UP_WORDS = re.compile(
+    r"\b(rose|risen|rise|rises|increased?|increases|up|higher|climbed|gained)\b", re.I
+)
+DOWN_WORDS = re.compile(
+    r"\b(fell|fallen|fall|falls|decreased?|decreases|down|lower|dropped|declined?)\b", re.I
+)
+CHANGE_KINDS = ("change", "pct_change", "yoy")
+
+
+def has_direction(text: str) -> bool:
+    return UP_WORDS.search(text) is not None or DOWN_WORDS.search(text) is not None
+
+
+def _format(fig: Figure, *, absolute: bool = False) -> str:
     places = 1 if fig.unit in ("pct", "pp") else 2
-    q = fig.value.quantize(Decimal(1).scaleb(-places), rounding=ROUND_HALF_UP)
+    value = abs(fig.value) if absolute else fig.value
+    q = value.quantize(Decimal(1).scaleb(-places), rounding=ROUND_HALF_UP)
     if fig.unit == "pct":
         return f"{q}%"
     return f"{q:,} {fig.unit}"
 
 
 def render(template: str, figures: FigurePack, book: FigureBook) -> str | None:
-    """`{F2}` becomes the figure's value and unit. An unknown or unlisted label gives None."""
-    allowed = {r.label for r in figures.refs}
+    """`{F2}` becomes the figure's value and unit. An unknown or unlisted label gives None.
+
+    With a direction word in the template ("fell", "rose"), a change-type figure shows its
+    absolute value: the word carries the sign.
+    """
+    allowed = {r.label: r for r in figures.refs}
+    directional = has_direction(PLACEHOLDER.sub(" ", template))
     by_id = {f.id: f for f in book.figures}
     bad = False
 
@@ -54,7 +73,7 @@ def render(template: str, figures: FigurePack, book: FigureBook) -> str | None:
         if label not in allowed or fig is None:
             bad = True
             return ""
-        return _format(fig)
+        return _format(fig, absolute=directional and allowed[label].kind in CHANGE_KINDS)
 
     out = PLACEHOLDER.sub(sub, template)
     if bad or _STRAY.search(out):

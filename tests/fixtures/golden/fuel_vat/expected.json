@@ -1,7 +1,26 @@
 {
-  "C1": {"status": "fact", "legal_stage": "bill"},
-  "C2": {"status": "fact", "legal_stage": null},
-  "C3": {"status": "inference", "legal_stage": "in_force"},
-  "C4": {"status": "inference", "legal_stage": null},
-  "C5": {"status": "refused", "legal_stage": null}
+ "C1": {
+  "status": "fact",
+  "legal_stage": "bill"
+ },
+ "C2": {
+  "status": "fact",
+  "legal_stage": null
+ },
+ "C3": {
+  "status": "inference",
+  "legal_stage": "in_force"
+ },
+ "C4": {
+  "status": "inference",
+  "legal_stage": null
+ },
+ "C5": {
+  "status": "refused",
+  "legal_stage": null
+ },
+ "C6": {
+  "status": "inference",
+  "legal_stage": null
+ }
 }

@@ -21,6 +21,7 @@ Relationship = Literal[
 ClaimType = Literal[
     "price", "rate", "statistic", "annual", "legal_status", "event", "forecast", "other"
 ]
+FigureKind = Literal["latest", "change", "pct_change", "yoy", "mean", "real"]
 LegalStage = Literal["proposed", "bill", "passed", "assented", "gazetted", "in_force"]
 
 
@@ -117,6 +118,8 @@ class FigureRef(BaseModel):
     generic: bool
     tier: int
     published: date | None = None
+    kind: FigureKind = "latest"
+    metric: str = ""
 
 
 class CandidateClaim(BaseModel):

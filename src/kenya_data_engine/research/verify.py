@@ -37,6 +37,7 @@ CHALLENGE_STAGE = "research_challenge"
 CHALLENGE_LIMITS = UsageLimits(request_limit=4, tool_calls_limit=3)
 BATCH = 5
 TOLERANCE = Decimal("0.005")  # values differing by more than 0.5% conflict
+_RANK = {"no": 0, "partial": 1, "yes": 2}
 _DEAD = ("refused", "speculation")
 
 
@@ -111,7 +112,11 @@ async def entail(
             for c in batch:
                 c.reasons.append(f"entailment not run: {msg}")
             continue
-        verdicts = {v.claim.strip().upper(): v.verdict for v in res.verdicts}
+        verdicts: dict[str, Literal["yes", "partial", "no"]] = {}
+        for item in res.verdicts:  # duplicates for one label: the worst verdict wins
+            label = item.claim.strip().upper()
+            if label not in verdicts or _RANK[item.verdict] < _RANK[verdicts[label]]:
+                verdicts[label] = item.verdict
         for c in batch:
             v = verdicts.get(c.id)
             if v is None:
@@ -139,27 +144,34 @@ def _close(a: Decimal, b: Decimal) -> bool:
     return top == 0 or abs(a - b) / top <= TOLERANCE
 
 
-def _key(c: Claim) -> tuple[str, str, str, str] | None:
+_Key = tuple[str, str, str, str, str, str]
+
+
+def _key(c: Claim) -> _Key | None:
+    """Claims conflict only within the same metric, entity, period, unit, type and legal stage:
+    a bill that proposes 8% never conflicts with a rate in force."""
     n = _primary(c)
     if c.metric is None or c.entity is None or n is None:
         return None
     return (
-        c.metric.strip().lower(),
-        c.entity.strip().lower(),
-        (c.period or "").strip().lower(),
+        _norm(c.metric),
+        _norm(c.entity),
+        _norm(c.period),
         n.unit,
+        c.claim_type,
+        c.legal_stage or "",
     )
 
 
 def detect_conflicts(claims: list[Claim]) -> list[Conflict]:
     """Group by (metric, entity, period); values differing by over 0.5% conflict."""
-    groups: dict[tuple[str, str, str, str], list[Claim]] = {}
+    groups: dict[_Key, list[Claim]] = {}
     for c in claims:
         k = _key(c)
         if c.status not in _DEAD and k is not None:
             groups.setdefault(k, []).append(c)
     out: list[Conflict] = []
-    for (metric, entity, period, _unit), members in groups.items():
+    for (metric, entity, period, *_rest), members in groups.items():
         clusters: list[list[Claim]] = []
         for c in members:
             v = _value(c)
@@ -222,6 +234,8 @@ def _norm(s: str | None) -> str:
 
 
 def _same_subject(a: Claim, b: Claim) -> bool:
+    if a.claim_type != b.claim_type:
+        return False
     if a.metric is None or a.entity is None or b.metric is None or b.entity is None:
         return False
     return (_norm(a.metric), _norm(a.entity), _norm(a.period)) == (

@@ -311,10 +311,12 @@ def test_generic_extraction_caps_at_inference(ctx, tmp_path):
     fbook.figures.append(
         Figure(id="F1", label="l", value=Decimal("198"), unit="KES/L", formula="value", inputs=[])
     )
-    cand = _cand(quote=None, evidence=None, text_template="Super is {F1}.", figures=["F1"])
+    cand = _cand(
+        quote=None, evidence=None, text_template="Super in Nairobi is {F1}.", figures=["F1"]
+    )
     (plain,) = _fact(ctx, deps, [cand], pack=pack(False), fbook=fbook)
     (generic,) = _fact(ctx, deps, [cand], pack=pack(True), fbook=fbook)
-    assert plain.status == "fact" and plain.text == "Super is 198.00 KES/L."
+    assert plain.status == "fact" and plain.text == "Super in Nairobi is 198.00 KES/L."
     assert generic.generic and generic.status == "inference"
     assert "generic extraction" in generic.reasons
 
@@ -478,3 +480,153 @@ async def test_golden_fuel_vat(ctx, tmp_path):
     (k,) = detect_conflicts(judged)
     assert (k.resolution, k.kept) == ("prefer_higher_tier", "C2")
     assert by_id["C2"].status == "fact" and by_id["C2"].conflicts == [k.id]
+
+
+# --- fix round 1 ---------------------------------------------------------------------------
+
+
+def test_bill_claim_never_conflicts_with_a_rate_in_force():
+    base = dict(entity="fuel", metric="vat rate on fuel", period="2026-09")
+    bill = _c("C1", "The Bill proposes to retain the VAT rate on fuel at 8 per cent.",
+              claim_type="legal_status", legal_stage="bill", legal_date=date(2026, 5, 4),
+              published=date(2026, 9, 20), **base)  # fmt: skip
+    rate = _c("C2", "The VAT rate on fuel is 16 per cent.", published=date(2026, 9, 15), **base)
+    press = _c("C3", "VAT on fuel is 8 per cent.", 3, published=date(2026, 9, 29), **base)
+    claims = [bill, rate, press]
+    conflicts = detect_conflicts(claims)
+    assert [(k.claim_ids, k.kept) for k in conflicts] == [(["C2", "C3"], "C2")]
+    out = {c.id: c.status for c in assign_status(claims, conflicts)}
+    assert out == {"C1": "fact", "C2": "fact", "C3": "inference"}
+    # a legal claim does not corroborate a rate claim either
+    assert assign_status([press, bill], [])[0].status == "inference"
+
+
+def _ref(label, kind, entity="Nairobi", period="2026-09"):
+    return FigureRef(
+        label=label, figure_id=label, series="s", entity=entity, period_label=period,
+        generic=False, tier=1, published=date(2026, 9, 15), kind=kind, metric="super",
+    )  # fmt: skip
+
+
+def _figbook(*pairs):
+    fb = FigureBook()
+    for fid, value, unit in pairs:
+        fb.figures.append(
+            Figure(id=fid, label="l", value=Decimal(value), unit=unit, formula="f", inputs=[])
+        )
+    return fb
+
+
+def test_figure_only_claims_are_checked(ctx, tmp_path):
+    deps = _book(ctx, tmp_path)
+    fb = _figbook(("F1", "198", "KES/L"), ("F2", "18", "KES/L"), ("F3", "-2.10", "KES/L"))
+    pack = FigurePack(
+        refs=[_ref("F1", "latest"), _ref("F2", "change"), _ref("F3", "change")],
+        markdown="", comparisons_csv="",
+    )  # fmt: skip
+
+    def one(template, figs, **kw):
+        c = _cand(quote=None, evidence=None, text_template=template, figures=figs, **kw)
+        return _static(ctx, deps, [c], pack=pack, fbook=fb)[0]
+
+    ok = one("Super in Nairobi rose by {F2}.", ["F2"])
+    assert ok.reasons == [] and ok.text == "Super in Nairobi rose by 18.00 KES/L."
+    down = one("Super in Nairobi fell by {F3}.", ["F3"])
+    assert down.reasons == [] and down.text == "Super in Nairobi fell by 2.10 KES/L."  # absolute
+    plain = one("Super in Nairobi changed by {F3}.", ["F3"])
+    assert plain.text == "Super in Nairobi changed by -2.10 KES/L."
+    wrong = one("Super in Nairobi fell by {F2}.", ["F2"])
+    assert wrong.status == "refused" and any("direction" in r for r in wrong.reasons)
+    wrong = one("Super in Nairobi rose by {F3}.", ["F3"])
+    assert wrong.status == "refused"
+    mombasa = one("Super in Mombasa costs {F1}.", ["F1"], entity="Mombasa")
+    assert mombasa.status == "refused" and not mombasa.entity_period_ok
+    assert any("does not name" in r for r in mombasa.reasons)
+    off = one("Super in Nairobi costs {F1}.", ["F1"], period="2025-03")
+    assert off.status == "refused" and any("overlap" in r for r in off.reasons)
+    (c,) = _fact(
+        ctx,
+        deps,
+        [
+            _cand(
+                quote=None,
+                evidence=None,
+                text_template="Super in Nairobi costs {F1}.",
+                figures=["F1"],
+            )
+        ],
+        pack=pack,
+        fbook=fb,
+    )
+    assert c.status == "fact" and c.entailment == "yes"
+
+
+FAR = "x " * 400
+
+
+def test_period_must_be_near_the_quote(ctx, tmp_path):
+    tail = "In Nairobi, super petrol is KSh 198.00 per litre."
+    far = f"Maximum prices from September 2026. {FAR} {tail}"
+    near = f"{FAR} In Nairobi, super petrol is KSh 198.00 per litre, from 15 September 2026."
+    q = "In Nairobi, super petrol is KSh 198.00 per litre"
+    deps = make_deps(ctx, tmp_path)
+    deps.book.add_text(T1, far, None, date(2026, 9, 15))
+    deps.book.add_text(T1 + "2", near, None, date(2026, 9, 15))
+    deps.book.add_text(T1 + "3", near.replace("September", "March"), None, date(2026, 9, 15))
+    kw = dict(quote=q)
+    a, b, wrong_month, annual = _static(
+        ctx, deps,
+        [_cand(evidence="E1", **kw), _cand(evidence="E2", **kw), _cand(evidence="E3", **kw),
+         _cand(evidence="E1", claim_type="annual", **kw)],
+    )  # fmt: skip
+    assert a.status == "refused" and "near the quote" in " ".join(a.reasons)
+    assert b.status == "inference"
+    assert wrong_month.status == "refused"
+    assert annual.status == "inference"  # page-wide fallback is for annual claims only
+
+
+async def test_duplicate_verdicts_worst_wins(ctx, tmp_path):
+    deps = _book(ctx, tmp_path)
+    claims = _static(ctx, deps, [_cand(), _cand()])
+
+    def out(_):
+        v = [("C1", "yes"), ("C1", "no"), ("C2", "yes"), ("c2", "partial"), ("C2", "yes")]
+        return {"verdicts": [{"claim": c, "verdict": x} for c, x in v]}
+
+    res = await entail(claims, deps.book, deps, model=function_model_returning(out))
+    assert [(c.entailment, c.status) for c in res] == [("no", "refused"), ("partial", "inference")]
+
+
+def test_sensitive_keywords_and_entity_anywhere_in_text(ctx, tmp_path):
+    deps = _book(ctx, tmp_path)
+    plain, charged, fraud = _static(
+        ctx, deps,
+        [_cand(), _cand(text_template="Nairobi: KSh 198.00 per litre, charged with fraud."),
+         _cand(text_template="A fraud notice on KSh 198.00 per litre.")],
+    )  # fmt: skip
+    assert not plain.sensitive and charged.sensitive and fraud.sensitive
+    vat = _cand(
+        text_template="VAT on fuel is charged at 16 per cent.", quote=LEGAL_Q, entity="fuel"
+    )
+    assert not _static(ctx, deps, [vat])[0].sensitive
+    # entity named elsewhere on the page (not in the quote) is accepted
+    elsewhere = _cand(entity="EPRA".lower(), quote=Q)
+    deps.book.add_text(T1 + "9", "EPRA says: " + PAGE, None, date(2026, 9, 15))
+    assert _static(ctx, deps, [_cand(evidence="E2", entity="epra")])[0].entity_period_ok
+    assert elsewhere and not _static(ctx, deps, [_cand(entity="epra")])[0].entity_period_ok
+
+
+def test_year_separators_digits_and_number_words(ctx, tmp_path):
+    deps = _book(ctx, tmp_path)
+    t = "Super petrol in Nairobi costs KSh 198.00 per litre in 2,026."
+    assert not _static(ctx, deps, [_cand(text_template=t)])[0].numbers_ok
+    digits = _static(ctx, deps, [_cand(entity="Nairobi 5", quote=Q), _cand(metric="vat 16")])
+    assert [c.status for c in digits] == ["refused", "refused"]
+    assert any("digits" in r for r in digits[0].reasons)
+    words = "Super petrol in Nairobi costs KSh 198.00 per litre, two hundred more than before."
+    c = _static(ctx, deps, [_cand(text_template=words)])[0]
+    assert c.status == "refused" and any("number word" in r for r in c.reasons)
+    both = _static(
+        ctx, deps, [_cand(text_template="Nairobi: one fuel price, KSh 198.00 per litre.")]
+    )
+    assert both[0].status == "refused"
