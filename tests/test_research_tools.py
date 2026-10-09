@@ -4,10 +4,12 @@ from types import SimpleNamespace
 import openpyxl
 import pytest
 
+import kenya_data_engine.research.tools as tools
 from kenya_data_engine.data.registry import CatalogEntry, load_catalog
 from kenya_data_engine.errors import BudgetExceeded, SearchError
 from kenya_data_engine.research.budget import Ledger
 from kenya_data_engine.research.evidence import EvidenceBook
+from kenya_data_engine.research.models import DataSourceSpec
 from kenya_data_engine.research.tools import (
     ResearchDeps,
     list_links,
@@ -39,14 +41,18 @@ class FakeSearch:
 
 
 class FakeMemory:
-    def __init__(self, urls=(), lines=()):
-        self.urls, self.lines = set(urls), list(lines)
+    def __init__(self, specs=()):
+        self.specs = list(specs)
 
-    def lookup(self, url):
-        return url in self.urls
+    def lookup(self, need, today):
+        return [s for _, s in self.specs]
 
     def search(self, query):
-        return self.lines
+        return self.specs
+
+
+def _spec(url="https://a.go.ke/p"):
+    return DataSourceSpec(need="n1", via="page_text", url=url, publisher="Pub", why="w")
 
 
 def _deps(ctx, tmp_path, search=None, memory=None, catalog=None):
@@ -100,8 +106,10 @@ async def test_read_page_returns_packet_with_label(ctx, tmp_path, respx_mock, da
     out = await read_page(_pai(deps), PAGE_URL, "super price")
     assert out.startswith('<evidence id="E1" untrusted="true"') and 'tier="1"' in out
     assert "KSh 190" in out
-    # a registry or memory url is allowed without a prior search
-    deps2 = _deps(ctx, tmp_path, memory=FakeMemory(urls=[PAGE_URL]))
+    # a url returned by memory_lookup is allowed without a prior search
+    deps2 = _deps(ctx, tmp_path, memory=FakeMemory([("k1", _spec(PAGE_URL))]))
+    assert (await read_page(_pai(deps2), PAGE_URL, "x")).startswith("error: unknown")
+    memory_lookup(_pai(deps2), "x")
     assert (await read_page(_pai(deps2), PAGE_URL, "x")).startswith("<evidence")
 
 
@@ -176,8 +184,9 @@ async def test_search_budget_message(ctx, tmp_path):
 
 
 def test_memory_lookup(ctx, tmp_path):
-    deps = _deps(ctx, tmp_path, memory=FakeMemory(lines=["https://a.go.ke — a — worked"]))
-    assert memory_lookup(_pai(deps), "x") == "https://a.go.ke — a — worked"
+    deps = _deps(ctx, tmp_path, memory=FakeMemory([("k1", _spec())]))
+    assert memory_lookup(_pai(deps), "x") == "k1 — Pub — https://a.go.ke/p"
+    assert "https://a.go.ke/p" in deps.memory_urls
     assert memory_lookup(_pai(_deps(ctx, tmp_path)), "x") == "no remembered sources"
 
 
@@ -195,3 +204,66 @@ def test_tools_are_registrable(name):
     import kenya_data_engine.research.tools as t
 
     Agent(TestModel(), deps_type=ResearchDeps, tools=[getattr(t, name)])
+
+
+def test_registry_urls_cached(ctx, tmp_path):
+    deps = _deps(ctx, tmp_path, catalog=load_catalog(ctx.home))
+    first = tools._registry_urls(deps)
+    assert tools._registry_urls(deps) is first
+
+
+async def test_tools_never_raise(ctx, tmp_path, monkeypatch):
+    async def boom(*a, **k):
+        raise RuntimeError("kaboom")
+
+    monkeypatch.setattr(tools, "policy_fetch", boom)
+    deps = _deps(ctx, tmp_path, search=FakeSearch(exc=RuntimeError("kaboom")))
+    deps.book.seen_urls.add(PAGE_URL)
+
+    def sync_boom(*a, **k):
+        raise RuntimeError("kaboom")
+
+    deps.memory = SimpleNamespace(search=sync_boom)
+
+    async def ok(*a, **k):
+        return True
+
+    monkeypatch.setattr(tools, "robots_allowed", ok)
+    for out in (
+        await web_search(_pai(deps), "q"),
+        await list_links(_pai(deps), PAGE_URL),
+        await preview_table(_pai(deps), PAGE_URL),
+    ):
+        assert out == "error: kaboom"
+    assert memory_lookup(_pai(deps), "q") == "error: kaboom"
+
+
+async def test_robots_disallowed(ctx, tmp_path, respx_mock, data_net):
+    respx_mock.get("https://www.epra.go.ke/robots.txt").respond(
+        200, content=b"User-agent: *\nDisallow: /prices\n"
+    )
+    deps = _deps(ctx, tmp_path)
+    deps.book.seen_urls.add(PAGE_URL)
+    for out in (
+        await read_page(_pai(deps), PAGE_URL, "x"),
+        await list_links(_pai(deps), PAGE_URL),
+        await preview_table(_pai(deps), PAGE_URL),
+    ):
+        assert out == "error: disallowed by robots.txt"
+
+
+async def test_final_url_and_redaction_in_seen(ctx, tmp_path, respx_mock, data_net):
+    respx_mock.get("https://old.epra.go.ke/a").respond(
+        302, headers={"location": "https://www.epra.go.ke/new"}
+    )
+    respx_mock.get("https://www.epra.go.ke/new").respond(200, content=b'<a href="/z">z</a>')
+    deps = _deps(ctx, tmp_path)
+    deps.book.seen_urls.add("https://old.epra.go.ke/a")
+    await list_links(_pai(deps), "https://old.epra.go.ke/a")
+    assert "https://www.epra.go.ke/new" in deps.book.seen_urls
+    search = FakeSearch(
+        [SearchResult(title="t", url="https://x.com/?k=fake-deepseek", snippet="s")]
+    )
+    deps2 = _deps(ctx, tmp_path, search)
+    await web_search(_pai(deps2), "q")
+    assert not any("fake-deepseek" in u for u in deps2.book.seen_urls)

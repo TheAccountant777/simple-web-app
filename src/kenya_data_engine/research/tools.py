@@ -5,6 +5,7 @@ URL allowlist: a URL an agent passes in must have been returned by a tool earlie
 """
 
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Any, Protocol
 from urllib.parse import urljoin
 
@@ -12,13 +13,14 @@ from pydantic_ai import RunContext as PaiRunContext
 from selectolax.lexbor import LexborHTMLParser
 
 from kenya_data_engine.context import RunContext
-from kenya_data_engine.data.adapters.base import policy_fetch
+from kenya_data_engine.data.adapters.base import policy_fetch, robots_allowed
 from kenya_data_engine.data.extract import Locator, extract_tables
 from kenya_data_engine.data.registry import CatalogEntry
-from kenya_data_engine.errors import BudgetExceeded, EngineError
+from kenya_data_engine.errors import BudgetExceeded
 from kenya_data_engine.models import normalize_url
 from kenya_data_engine.research.budget import Ledger
 from kenya_data_engine.research.evidence import EvidenceBook
+from kenya_data_engine.research.models import DataNeed, DataSourceSpec
 from kenya_data_engine.tools.search import FallbackSearch
 
 READ_CHARS = 8_000
@@ -30,12 +32,12 @@ _STOP_WORDS = 2  # query words of this length or shorter are ignored
 class SourceMemoryLike(Protocol):
     """What the tools need from source memory (the real store arrives in a later task)."""
 
-    def lookup(self, url: str) -> bool:
-        """True if `url` is a remembered source."""
+    def lookup(self, need: DataNeed, today: date) -> list[DataSourceSpec]:
+        """Remembered source specs that worked for a similar need."""
         ...
 
-    def search(self, query: str) -> list[str]:
-        """Lines describing remembered sources for similar needs."""
+    def search(self, query: str) -> list[tuple[str, DataSourceSpec]]:
+        """(memory key, spec) pairs matching a free-text query."""
         ...
 
 
@@ -49,6 +51,8 @@ class ResearchDeps:
     memory: SourceMemoryLike
     search: FallbackSearch
     log: list[str] = field(default_factory=list)  # tool-call lines for verification.md
+    memory_urls: set[str] = field(default_factory=set)  # urls of memory specs seen this dossier
+    _registry_cache: set[str] | None = field(default=None, repr=False)
 
 
 Ctx = PaiRunContext[ResearchDeps]
@@ -65,6 +69,8 @@ def _err(deps: ResearchDeps, tool: str, exc: Exception) -> str:
 
 
 def _registry_urls(deps: ResearchDeps) -> set[str]:
+    if deps._registry_cache is not None:
+        return deps._registry_cache
     out: set[str] = set()
 
     def walk(v: Any) -> None:
@@ -80,6 +86,7 @@ def _registry_urls(deps: ResearchDeps) -> set[str]:
     for entry in deps.catalog.values():
         if entry.enabled:
             walk(entry.params)
+    deps._registry_cache = out
     return out
 
 
@@ -89,7 +96,20 @@ def _allowed(deps: ResearchDeps, url: str) -> bool:
     norm = normalize_url(url)
     if any(normalize_url(u) == norm for u in deps.book.seen_urls):
         return True
-    return norm in _registry_urls(deps) or deps.memory.lookup(url)
+    return norm in _registry_urls(deps) or url in deps.memory_urls or norm in deps.memory_urls
+
+
+_ROBOTS = "error: disallowed by robots.txt"
+
+
+async def _robots_blocked(deps: ResearchDeps, url: str) -> bool:
+    if normalize_url(url) in _registry_urls(deps):
+        return False  # registry sources are polled by the data layer under its own rules
+    return not await robots_allowed(url, deps.ctx)
+
+
+def _seen(deps: ResearchDeps, *urls: str) -> None:
+    deps.book.seen_urls.update(deps.ctx.tracer.redact(u) for u in urls)
 
 
 _UNKNOWN_URL = "error: unknown url — use a url from search results"
@@ -103,10 +123,9 @@ async def web_search(ctx: Ctx, query: str, domains: list[str] | None = None) -> 
     except BudgetExceeded:
         _note(deps, f"web_search {query!r}: budget exhausted")
         return "budget exhausted: stop searching"
-    except EngineError as exc:
+    except Exception as exc:
         return _err(deps, "web_search", exc)
-    for r in results:
-        deps.book.seen_urls.add(r.url)
+    _seen(deps, *(r.url for r in results))
     _note(deps, f"web_search {query!r}: {len(results)} results")
     if not results:
         return "no results"
@@ -123,8 +142,11 @@ async def read_page(ctx: Ctx, url: str, focus: str) -> str:
         _note(deps, f"read_page {url}: rejected, unknown url")
         return _UNKNOWN_URL
     try:
+        if await _robots_blocked(deps, url):
+            _note(deps, f"read_page {url}: disallowed by robots.txt")
+            return _ROBOTS
         ev = await deps.book.add_url(url, deps.ctx)
-    except (EngineError, ValueError, OSError) as exc:
+    except Exception as exc:
         return _err(deps, "read_page", exc)
     _note(deps, f"read_page {url}: {ev.label} tier {ev.tier}")
     return deps.book.packet([ev.label], focus, READ_CHARS)
@@ -137,9 +159,13 @@ async def list_links(ctx: Ctx, url: str, contains: str = "") -> str:
         _note(deps, f"list_links {url}: rejected, unknown url")
         return _UNKNOWN_URL
     try:
+        if await _robots_blocked(deps, url):
+            _note(deps, f"list_links {url}: disallowed by robots.txt")
+            return _ROBOTS
         res = await policy_fetch(url, deps.ctx, "page")
+        _seen(deps, res.url)
         tree = LexborHTMLParser(res.content.decode("utf-8", errors="replace"))
-    except (EngineError, ValueError, OSError) as exc:
+    except Exception as exc:
         return _err(deps, "list_links", exc)
     needle = contains.lower()
     found: list[tuple[str, str]] = []
@@ -155,7 +181,7 @@ async def list_links(ctx: Ctx, url: str, contains: str = "") -> str:
         found.append((text[:100], href))
         if len(found) >= MAX_LINKS:
             break
-    deps.book.seen_urls.update(h for _, h in found)
+    _seen(deps, *(h for _, h in found))
     _note(deps, f"list_links {url}: {len(found)} links")
     if not found:
         return "no links found"
@@ -169,11 +195,15 @@ async def preview_table(ctx: Ctx, url: str, page: int | None = None, table_index
         _note(deps, f"preview_table {url}: rejected, unknown url")
         return _UNKNOWN_URL
     try:
+        if await _robots_blocked(deps, url):
+            _note(deps, f"preview_table {url}: disallowed by robots.txt")
+            return _ROBOTS
         res = await policy_fetch(url, deps.ctx, "item")
+        _seen(deps, res.url)
         tables = await extract_tables(
             res.content, Locator(pages=[page] if page else []), deps.ctx.config.data
         )
-    except (EngineError, ValueError, OSError) as exc:
+    except Exception as exc:
         return _err(deps, "preview_table", exc)
     if not tables:
         _note(deps, f"preview_table {url}: no tables")
@@ -190,12 +220,15 @@ async def preview_table(ctx: Ctx, url: str, page: int | None = None, table_index
 def registry_lookup(ctx: Ctx, query: str) -> str:
     """Find enabled registry series whose key or title matches the query words."""
     deps = ctx.deps
-    words = [w for w in query.lower().split() if len(w) > _STOP_WORDS]
-    hits = [
-        f"{e.key} — {e.title} — {e.publisher} — tier {e.tier}"
-        for e in deps.catalog.values()
-        if e.enabled and any(w in f"{e.key} {e.title}".lower() for w in words)
-    ]
+    try:
+        words = [w for w in query.lower().split() if len(w) > _STOP_WORDS]
+        hits = [
+            f"{e.key} — {e.title} — {e.publisher} — tier {e.tier}"
+            for e in deps.catalog.values()
+            if e.enabled and any(w in f"{e.key} {e.title}".lower() for w in words)
+        ]
+    except Exception as exc:
+        return _err(deps, "registry_lookup", exc)
     _note(deps, f"registry_lookup {query!r}: {len(hits)} hits")
     return "\n".join(hits) if hits else "no registry series match"
 
@@ -203,6 +236,15 @@ def registry_lookup(ctx: Ctx, query: str) -> str:
 def memory_lookup(ctx: Ctx, query: str) -> str:
     """Remembered sources that worked for similar needs."""
     deps = ctx.deps
-    lines = deps.memory.search(query)
+    try:
+        pairs = deps.memory.search(query)
+    except Exception as exc:
+        return _err(deps, "memory_lookup", exc)
+    lines = []
+    for key, spec in pairs:
+        if spec.url:
+            deps.memory_urls.add(spec.url)
+            deps.memory_urls.add(normalize_url(spec.url))
+        lines.append(f"{key} — {spec.publisher} — {spec.url}")
     _note(deps, f"memory_lookup {query!r}: {len(lines)} hits")
     return "\n".join(lines) if lines else "no remembered sources"

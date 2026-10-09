@@ -39,3 +39,17 @@ def test_brief_chart_concept_bounds():
         _brief(chart_concepts=[])
     with pytest.raises(ValidationError):
         _brief(chart_concepts=[ChartConcept(id="c", relationship="ranking", idea="x")] * 5)
+
+
+def test_reject_verdict_allows_no_needs():
+    assert _brief(verdict="reject", data_needs=[]).data_needs == []
+    with pytest.raises(ValidationError):
+        _brief(verdict="reframed", data_needs=[])
+
+
+def test_need_ids_always_renumbered():
+    needs = [
+        DataNeed(id="x", kind="fact", question="a"),
+        DataNeed(id="x", kind="fact", question="b"),
+    ]
+    assert [n.id for n in _brief(data_needs=needs).data_needs] == ["n1", "n2"]

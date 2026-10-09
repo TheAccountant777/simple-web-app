@@ -69,8 +69,9 @@ class ResearchBrief(BaseModel):
 
     @model_validator(mode="after")
     def _check_shape(self) -> "ResearchBrief":
-        if not 1 <= len(self.data_needs) <= 6:
-            raise ValueError(f"data_needs must hold 1-6 needs, got {len(self.data_needs)}")
+        low = 0 if self.verdict == "reject" else 1
+        if not low <= len(self.data_needs) <= 6:
+            raise ValueError(f"data_needs must hold {low}-6 needs, got {len(self.data_needs)}")
         if not any(a.contrarian for a in self.angles):
             raise ValueError("angles must include at least one contrarian angle")
         if not 1 <= len(self.chart_concepts) <= 4:
@@ -78,8 +79,7 @@ class ResearchBrief(BaseModel):
                 f"chart_concepts must hold 1-4 concepts, got {len(self.chart_concepts)}"
             )
         for i, need in enumerate(self.data_needs, start=1):
-            if not need.id:
-                need.id = f"n{i}"
+            need.id = f"n{i}"  # always by position, whatever the model supplied
         return self
 
 

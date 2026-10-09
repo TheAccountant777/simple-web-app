@@ -25,7 +25,7 @@ from kenya_data_engine.tools.urlpolicy import sniff
 _HYPHEN = re.compile(r"(\w)-\n\s*([a-z])")
 _WRAP = re.compile(r"(?<![.!?:;\"'”|)\]])\n(?=[a-z])")
 _TOKEN = re.compile(r"[a-z0-9]+(?:[.,][0-9]+)*")
-_TAG = re.compile(r"<(/?)evidence", re.IGNORECASE)
+_TAG = re.compile(r"<\s*(/?)\s*evidence", re.IGNORECASE)
 _PDF_DATE = re.compile(r"D:(\d{4})(\d{2})?(\d{2})?")
 GAP = "[…]"
 
@@ -188,15 +188,18 @@ class EvidenceBook:
         for i, p in enumerate(paras):
             words, nums = _tokens(p)
             scored.append((len(words & qwords) + 2 * len(nums & qnums), i))
+        gap = len(GAP) + 1
         keep: set[int] = set()
         used = 0
+        truncated = False
         for _score, i in sorted(scored, key=lambda s: (-s[0], s[1])):
             size = len(paras[i]) + 1
             if used + size > max_chars:
                 if not keep:  # one huge paragraph: truncate rather than return nothing
-                    paras[i] = paras[i][:max_chars]
+                    paras[i] = paras[i][: max(0, max_chars - gap - 1)]
                     keep.add(i)
                     used = max_chars
+                    truncated = True
                 continue
             keep.add(i)
             used += size
@@ -207,9 +210,23 @@ class EvidenceBook:
                 out.append(GAP)
             out.append(paras[i])
             prev = i
-        if prev != len(paras) - 1:
+        if prev != len(paras) - 1 or truncated:
             out.append(GAP)
-        return "\n".join(out)
+        # gap markers count against the cap: drop the lowest-scored kept paragraphs until it fits
+        res = "\n".join(out)
+        while len(res) > max_chars and len(keep) > 1:
+            worst = min(keep, key=lambda i: (scored[i][0], -i))
+            keep.discard(worst)
+            out, prev = [], -1
+            for i in sorted(keep):
+                if i != prev + 1:
+                    out.append(GAP)
+                out.append(paras[i])
+                prev = i
+            if prev != len(paras) - 1:
+                out.append(GAP)
+            res = "\n".join(out)
+        return res[:max_chars]
 
     def packet(self, labels: list[str], query: str, per_source_chars: int = 24_000) -> str:
         blocks: list[str] = []

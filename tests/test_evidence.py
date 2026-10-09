@@ -109,3 +109,25 @@ async def test_add_url_records_a_blob_ref_for_gc(respx_mock, ctx, data_net, tmp_
     respx_mock.get("https://www.epra.go.ke/p").respond(200, content=_html(LONG, LONG + " Again."))
     ev = await EvidenceBook(tmp_path, TIERS).add_url("https://www.epra.go.ke/p", ctx)
     assert ev.blob_sha256 in BlobStore.referenced(ctx.home.db_path)
+
+
+def test_snippets_cap_is_exact_with_gaps(tmp_path):
+    paras = [f"Paragraph {i} " + "x" * 30 for i in range(30)]
+    book = EvidenceBook(tmp_path, TIERS)
+    ev = book.add_text("https://x.com/a", "\n".join(paras), "t", None)
+    for cap in (100, 157, 300, 500):
+        assert len(book.snippets(ev, "paragraph 7 17 27", max_chars=cap)) <= cap
+    big = book.add_text("https://x.com/b", "y" * 5000, "t", None)
+    out = book.snippets(big, "y", max_chars=1000)
+    assert len(out) <= 1000 and out.endswith("[…]")
+
+
+def test_packet_defangs_spaced_tags(tmp_path):
+    book = EvidenceBook(tmp_path, TIERS)
+    ev = book.add_text(
+        "https://x.com/a", "a < /evidence> b </ EVIDENCE> c < evidence id=1>", None, None
+    )
+    pkt = book.packet([ev.label], "a")
+    assert pkt.count("evidence") == 3 + 2  # open tag + close tag + 3 defanged remain as text
+    body = pkt.split("\n", 1)[1].rsplit("\n", 1)[0]
+    assert "</" not in body and "< /" not in body and "< evidence" not in body
