@@ -7,7 +7,10 @@ import typer
 
 from kenya_data_engine import __version__
 from kenya_data_engine.cli import compare, doctor, init, report, run, stage, tui
+from kenya_data_engine.cli.catalog import catalog_app
 from kenya_data_engine.cli.common import make_state
+from kenya_data_engine.cli.data import data_app
+from kenya_data_engine.cli.gc import gc
 from kenya_data_engine.cli.sources import sources_app
 
 app = typer.Typer(
@@ -59,6 +62,9 @@ def main(
       engine report          speed, cost and reliability of past runs
       engine compare         which topics keep coming back across runs
       engine stage radar     just collect signals
+      engine data list       the series warehouse; `data fetch <key>`, `data show <key>`
+      engine catalog probe   live-check catalog sources (`--save-samples DIR`)
+      engine gc              prune unreferenced blobs
     """
     ctx.obj = make_state(home, verbose, quiet)
 
@@ -71,4 +77,7 @@ app.command("tui")(tui.tui)
 app.command("browse", help="Alias for `engine tui`.")(tui.tui)
 app.command("init")(init.init)
 app.command("doctor")(doctor.doctor)
+app.command("gc")(gc)
 app.add_typer(sources_app)
+app.add_typer(data_app)
+app.add_typer(catalog_app)

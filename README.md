@@ -89,6 +89,25 @@ engine sources test --all [--json]           # every enabled source
 or the exact error with a hint. It exits 0 only if every tested source returned items, and
 `--json` output has a stable shape for scripts.
 
+### `engine data`, `engine catalog probe`, `engine gc`
+
+The data warehouse: dated, quote-free numbers with provenance, from `defaults/catalog.yaml`
+(merged with `~/.kenya-data-engine/catalog.yaml` by key). Only the two World Bank series ship
+enabled; every other entry is unverified until you probe it on your laptop.
+
+```
+engine data list [--json]                    # keys, adapter, tier, enabled, rows stored
+engine data fetch <key> [--limit N] [--json] # discover, download, extract, check, store
+engine data show <key> [--entity E] [--last N] [--csv]
+engine catalog probe [KEY...] [--all] [--save-samples DIR] [--json]
+engine gc [--older-than 90d] [--yes]         # prune blobs no stored row references
+```
+
+`fetch` exits 1 on an error or a quarantined table (the blob is kept, nothing is stored).
+`probe` is diagnostic (no rows written, exit 0): it runs discovery live, reports the final URL,
+links found and the sniffed type of the first item, and with `--save-samples` keeps up to two
+items per key plus `probe.json` for writing a parser.
+
 ## Engine Room (TUI) and comparing runs
 
 ```bash
