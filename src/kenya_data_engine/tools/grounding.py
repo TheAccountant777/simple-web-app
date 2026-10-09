@@ -33,10 +33,10 @@ def quote_in_text(quote: str, text: str, threshold: float = 0.9) -> bool:
     if not q:
         return False
     t = normalize(text)
-    if q in t:
-        return True
     if any(not _has_number(n, t) for n in _NUMBER.findall(q)):
         return False
+    if q in t:
+        return True
     if len(q) < MIN_FUZZY_LEN or len(t) < len(q):
         return False
     return bool(fuzz.partial_ratio(q, t) >= threshold * 100)

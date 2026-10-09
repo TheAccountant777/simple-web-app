@@ -50,3 +50,9 @@ def test_grounding_numbers_are_token_bounded():
     assert not quote_in_text("rate rose to 9.5 percent in the latest monthly survey", text)
     assert not quote_in_text("rate rose to 9 percent in the latest monthly survey", text)
     assert quote_in_text("rate rose to 19.5 percent in the latest monthly survey", text)
+
+
+def test_grounding_numeric_guard_runs_before_substring_match():
+    quote = "9.5 percent in the latest survey"
+    assert not quote_in_text(quote, "inflation rose to 19.5 percent in the latest survey")
+    assert quote_in_text(quote, "inflation rose to 9.5 percent in the latest survey")
