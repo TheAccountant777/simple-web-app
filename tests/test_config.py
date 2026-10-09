@@ -106,3 +106,26 @@ def test_dotenv_secret_and_missing_secrets(tmp_home):
     assert secrets.tavily_api_key.get_secret_value() == "tv"
     assert secrets.deepseek_api_key is None and secrets.serper_api_key is None
     assert "tv" not in repr(secrets)
+
+
+def test_weights_must_have_exact_keys(tmp_home):
+    tmp_home.config_path.write_text("weights: {data_ability: 0.5, wallet_impact: 0.5}\n")
+    with pytest.raises(ConfigError) as ei:
+        load_config(tmp_home)
+    assert ei.value.hint
+
+
+def test_weights_must_be_non_negative(tmp_home):
+    tmp_home.config_path.write_text(
+        "weights: {data_ability: 0.85, wallet_impact: 0.2, timeliness: 0.2,"
+        " clarity_gap: 0.15, novelty: -0.4}\n"
+    )
+    with pytest.raises(ConfigError) as ei:
+        load_config(tmp_home)
+    assert ei.value.hint
+
+
+def test_invalid_listing_kind_raises_config_error(tmp_home):
+    tmp_home.config_path.write_text("radar:\n  listings:\n    cbk:\n      kind: bogus\n")
+    with pytest.raises(ConfigError):
+        load_config(tmp_home)

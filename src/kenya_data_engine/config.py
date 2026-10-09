@@ -9,6 +9,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from kenya_data_engine.errors import ConfigError
 from kenya_data_engine.home import EngineHome
+from kenya_data_engine.models import SignalKind
+
+WEIGHT_KEYS = frozenset({"data_ability", "wallet_impact", "timeliness", "clarity_gap", "novelty"})
 
 
 class Secrets(BaseSettings):
@@ -56,7 +59,7 @@ class ListingSpec(BaseModel):
     title: str
     link: str
     date: str | None = None
-    kind: str
+    kind: SignalKind
 
 
 class RadarConfig(BaseModel):
@@ -118,6 +121,12 @@ def load_config(home: EngineHome) -> EngineConfig:
         cfg = EngineConfig.model_validate(merged)
     except ValidationError as exc:
         raise ConfigError("invalid config", hint=str(exc)) from exc
+    if set(cfg.weights) != WEIGHT_KEYS or any(v < 0 for v in cfg.weights.values()):
+        raise ConfigError(
+            "weights must have exactly the keys " + ", ".join(sorted(WEIGHT_KEYS)) + " and be >= 0",
+            hint=f"edit `weights` in {home.config_path}; current keys are "
+            f"{', '.join(sorted(cfg.weights))}",
+        )
     if abs(sum(cfg.weights.values()) - 1.0) > 1e-6:
         raise ConfigError(
             "weights must sum to 1.0",
