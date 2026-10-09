@@ -20,6 +20,7 @@ dependencies = [
   "PyYAML>=6.0",
   "cryptography>=42",
   "certifi>=2024.2.2",
+  "textual>=1,<2",
 ]
 
 [project.scripts]
@@ -45,7 +46,7 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/kenya_data_engine"]
-include = ["src/kenya_data_engine/defaults/*.yaml", "src/kenya_data_engine/prompts/*.md"]
+include = ["src/kenya_data_engine/defaults/*.yaml", "src/kenya_data_engine/prompts/*.md", "src/kenya_data_engine/tui/*.tcss"]
 
 [tool.ruff]
 line-length = 100
@@ -54,6 +55,11 @@ extend-exclude = ["docs", ".superpowers", "spikes"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+# the score maths and failure counts deliberately use the multiplication sign
+"src/kenya_data_engine/tui/*.py" = ["RUF001", "RUF012"]  # RUF012: Textual BINDINGS idiom
+"tests/test_tui_*.py" = ["RUF001"]
 
 [tool.mypy]
 python_version = "3.12"

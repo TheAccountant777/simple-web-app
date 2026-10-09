@@ -1,0 +1,52 @@
+/* Calm, low-contrast chrome with one soft accent; status colours appear only on data. */
+Screen { background: #15171c; color: #c9ced8; }
+Header { background: #1b1e25; color: #c9ced8; }
+Footer { background: #1b1e25; }
+TabbedContent { height: 1fr; }
+TabPane { padding: 0; }
+RunsPane, SourcesPane { height: 1fr; width: 1fr; }
+#runs-body { height: 1fr; }
+#sources-body { height: 1fr; }
+Tabs { background: #15171c; }
+Tab { color: #7d8594; }
+Tab.-active { color: #e6e9ef; text-style: bold; }
+Underline > .underline--bar { color: #7aa2c4; background: #2e333d; }
+
+OptionList, DataTable, VerticalScroll#runs-detail, VerticalScroll#source-detail-box {
+    background: #181b21;
+    border: round #2e333d;
+    border-title-color: #8c95a6;
+    scrollbar-size-vertical: 1;
+}
+OptionList:focus, DataTable:focus, VerticalScroll#runs-detail:focus-within,
+VerticalScroll#source-detail-box:focus {
+    border: round #7aa2c4;
+    border-title-color: #c9ced8;
+}
+OptionList > .option-list--option-highlighted, DataTable > .datatable--cursor {
+    background: #26303c;
+    color: #e6e9ef;
+}
+DataTable > .datatable--header { background: #181b21; color: #7d8594; text-style: none; }
+
+.placeholder { margin: 2 4; color: #7d8594; }
+#runs-empty { margin: 2 4; color: #7d8594; }
+#runs-left { width: 36%; min-width: 34; }
+#run-list { height: 9; }
+#topic-table { height: 1fr; }
+#runs-detail { width: 1fr; padding: 0 1; }
+#signals { height: auto; max-height: 8; margin-top: 1; }
+#exchanges { height: auto; max-height: 6; margin-top: 1; }
+#detail { height: auto; }
+
+#filter { margin: 0 0 0 0; border: round #7aa2c4; background: #181b21; }
+#sources-table { height: 1fr; }
+#source-detail-box { height: 10; padding: 0 1; }
+#test-progress { padding: 0 1; height: 1; }
+
+InspectorScreen, HelpScreen { align: center middle; background: #0c0d10 75%; }
+#inspector { width: 92%; height: 92%; background: #181b21; border: round #7aa2c4; }
+#inspector VerticalScroll { padding: 0 1; }
+#inspector-keys { height: 1; padding: 0 1; color: #7d8594; background: #1b1e25; }
+#help { width: 72; height: auto; background: #181b21; border: round #7aa2c4; padding: 1 2; }
+#help-keys { margin-top: 1; }
