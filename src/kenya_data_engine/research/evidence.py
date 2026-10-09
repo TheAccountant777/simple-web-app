@@ -195,49 +195,40 @@ class EvidenceBook:
         for i, p in enumerate(paras):
             words, nums = _tokens(p)
             scored.append((len(words & qwords) + 2 * len(nums & qnums), i))
-        gap = len(GAP) + 1
-        keep: set[int] = set()
-        used = 0
-        truncated = False
-        for _score, i in sorted(scored, key=lambda s: (-s[0], s[1])):
-            size = len(paras[i]) + 1
-            if used + size > max_chars:
-                if not keep:  # one huge paragraph: truncate rather than return nothing
-                    paras[i] = paras[i][: max(0, max_chars - gap - 1)]
-                    keep.add(i)
-                    used = max_chars
-                    truncated = True
-                continue
-            keep.add(i)
-            used += size
-        out: list[str] = []
-        prev = -1
-        for i in sorted(keep):
-            if i != prev + 1:
-                out.append(GAP)
-            out.append(paras[i])
-            prev = i
-        if prev != len(paras) - 1 or truncated:
-            out.append(GAP)
-        # gap markers count against the cap: drop the lowest-scored kept paragraphs until it fits
-        res = "\n".join(out)
-        while len(res) > max_chars and len(keep) > 1:
-            worst = min(keep, key=lambda i: (scored[i][0], -i))
-            keep.discard(worst)
-            out, prev = [], -1
+
+        def render(keep: set[int], cut: bool = False) -> str:
+            out: list[str] = []
+            prev = -1
             for i in sorted(keep):
                 if i != prev + 1:
                     out.append(GAP)
                 out.append(paras[i])
                 prev = i
-            if prev != len(paras) - 1:
+            if prev != len(paras) - 1 or cut:  # cut: the last paragraph itself was shortened
                 out.append(GAP)
-            res = "\n".join(out)
-        if len(res) > max_chars and len(keep) == 1:
-            (only,) = keep  # shorten the paragraph itself so the gap markers survive
-            overhead = len(res) - len(paras[only])
-            paras[only] = paras[only][: max(0, max_chars - overhead)]
-            res = "\n".join(([GAP] if only > 0 else []) + [paras[only], GAP])
+            return "\n".join(out)
+
+        keep: set[int] = set()
+        used = 0
+        for _score, i in sorted(scored, key=lambda s: (-s[0], s[1])):
+            size = len(paras[i]) + 1
+            if used + size <= max_chars:
+                keep.add(i)
+                used += size
+        if not keep:  # every paragraph is bigger than the cap: start from the best one
+            keep.add(min(scored, key=lambda s: (-s[0], s[1]))[1])
+        # gap markers count against the cap: drop the lowest-scored kept paragraphs until it fits
+        res = render(keep)
+        while len(res) > max_chars and len(keep) > 1:
+            keep.discard(min(keep, key=lambda i: (scored[i][0], -i)))
+            res = render(keep)
+        if len(res) > max_chars:
+            (only,) = keep  # shorten the paragraph itself, reserving room for both markers
+            full = paras[only]
+            paras[only] = ""
+            overhead = len(render(keep, cut=True))
+            paras[only] = full[: max(0, max_chars - overhead)]
+            res = render(keep, cut=True)
         return res[:max_chars]
 
     def packet(self, labels: list[str], query: str, per_source_chars: int = 24_000) -> str:

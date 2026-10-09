@@ -139,3 +139,15 @@ def test_snippets_keeps_trailing_gap_marker(tmp_path):
         ev = book.add_text("https://x.com/" + str(cap), text, "t", None)
         out = book.snippets(ev, "q", max_chars=cap)
         assert len(out) <= cap and out.endswith("[…]")
+
+
+def test_snippets_last_paragraph_near_cap(tmp_path):
+    book = EvidenceBook(tmp_path, TIERS)
+    last = "needle " + "w" * 240
+    ev = book.add_text("https://x.com/last", "A" * 99 + ".\n" + last, "t", None)
+    out = book.snippets(ev, "needle", max_chars=250)
+    assert len(out) <= 250 and out.startswith("[…]\n")
+    assert out.endswith("[…]")  # shortened, so honestly marked; marker intact
+    fits = book.add_text("https://x.com/fit", "A" * 99 + ".\n" + "needle " + "w" * 150, "t", None)
+    out2 = book.snippets(fits, "needle", max_chars=200)
+    assert out2.startswith("[…]\n") and not out2.endswith("[…]")

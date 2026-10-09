@@ -52,6 +52,7 @@ class ResearchDeps:
     search: FallbackSearch
     log: list[str] = field(default_factory=list)  # tool-call lines for verification.md
     memory_urls: set[str] = field(default_factory=set)  # urls of memory specs seen this dossier
+    raw_urls: dict[str, str] = field(default_factory=dict)  # redacted url -> raw url (R10)
     _registry_cache: set[str] | None = field(default=None, repr=False)
 
 
@@ -115,7 +116,24 @@ async def robots_blocked(deps: ResearchDeps, url: str) -> bool:
 
 
 def _seen(deps: ResearchDeps, *urls: str) -> None:
-    deps.book.seen_urls.update(deps.ctx.tracer.redact(u) for u in urls)
+    redact = deps.ctx.tracer.redact
+    for u in urls:
+        r = redact(u)
+        deps.book.seen_urls.add(r)
+        if r != u:
+            deps.raw_urls[r] = u
+
+
+def _raw(deps: ResearchDeps, url: str) -> str:
+    """Map a url the model passed back (redacted) to the raw url the tool must fetch."""
+    redact = deps.ctx.tracer.redact
+    red = redact(url)
+    if red in deps.raw_urls:
+        return deps.raw_urls[red]
+    for u in (*deps.memory_urls, *_registry_urls(deps)):
+        if redact(u) == red:
+            return u
+    return url
 
 
 _UNKNOWN_URL = "error: unknown url — use a url from search results"
@@ -153,10 +171,11 @@ async def read_page(ctx: Ctx, url: str, focus: str) -> str:
         _note(deps, f"read_page {url}: rejected, unknown url")
         return _UNKNOWN_URL
     try:
-        if await robots_blocked(deps, url):
+        raw = _raw(deps, url)
+        if await robots_blocked(deps, raw):
             _note(deps, f"read_page {url}: disallowed by robots.txt")
             return _ROBOTS
-        ev = await deps.book.add_url(url, deps.ctx, final_ok=lambda f: _final_ok(deps, f))
+        ev = await deps.book.add_url(raw, deps.ctx, final_ok=lambda f: _final_ok(deps, f))
         _note(deps, f"read_page {url}: {ev.label} tier {ev.tier}")
         return deps.book.packet([ev.label], focus, READ_CHARS)
     except RobotsDisallowed:
@@ -173,11 +192,12 @@ async def list_links(ctx: Ctx, url: str, contains: str = "") -> str:
         _note(deps, f"list_links {url}: rejected, unknown url")
         return _UNKNOWN_URL
     try:
-        if await robots_blocked(deps, url):
+        raw = _raw(deps, url)
+        if await robots_blocked(deps, raw):
             _note(deps, f"list_links {url}: disallowed by robots.txt")
             return _ROBOTS
-        res = await policy_fetch(url, deps.ctx, "page")
-        if res.url != url and await robots_blocked(deps, res.url):
+        res = await policy_fetch(raw, deps.ctx, "page")
+        if res.url != raw and await robots_blocked(deps, res.url):
             _note(deps, f"list_links {url}: final url disallowed by robots.txt")
             return _ROBOTS
         _seen(deps, res.url)
@@ -218,11 +238,12 @@ async def preview_table(ctx: Ctx, url: str, page: int | None = None, table_index
         _note(deps, f"preview_table {url}: rejected, unknown url")
         return _UNKNOWN_URL
     try:
-        if await robots_blocked(deps, url):
+        raw = _raw(deps, url)
+        if await robots_blocked(deps, raw):
             _note(deps, f"preview_table {url}: disallowed by robots.txt")
             return _ROBOTS
-        res = await policy_fetch(url, deps.ctx, "item")
-        if res.url != url and await robots_blocked(deps, res.url):
+        res = await policy_fetch(raw, deps.ctx, "item")
+        if res.url != raw and await robots_blocked(deps, res.url):
             _note(deps, f"preview_table {url}: final url disallowed by robots.txt")
             return _ROBOTS
         _seen(deps, res.url)

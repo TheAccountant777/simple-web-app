@@ -297,10 +297,31 @@ async def test_list_links_survives_malformed_href(ctx, tmp_path, respx_mock, dat
     assert out == "[1] ok — https://www.epra.go.ke/ok"
 
 
-async def test_post_fetch_formatting_errors_are_strings(ctx, tmp_path, monkeypatch):
-    deps = _deps(ctx, tmp_path, SimpleNamespace(search=None))
-    out = await web_search(_pai(deps), "q")  # search attribute is not callable
-    assert out.startswith("error: ")
+async def test_post_fetch_formatting_errors_are_strings(ctx, tmp_path):
+    class Bad:
+        def __format__(self, spec):
+            raise RuntimeError("cannot format")
+
+    hit = SimpleNamespace(title=Bad(), url="https://x.com/a", snippet="s")
+    deps = _deps(ctx, tmp_path, FakeSearch([hit]))
+    assert await web_search(_pai(deps), "q") == "error: cannot format"
+
+
+async def test_redacted_url_is_fetched_as_raw(ctx, tmp_path, respx_mock, data_net):
+    raw = "https://www.epra.go.ke/p?k=fake-deepseek"
+    html = (
+        f"<html><body><article><p>{LONG}</p><p>{LONG} Super is KSh 190.</p></article></body></html>"
+    )
+    route = respx_mock.get(raw).respond(200, content=html.encode())
+    hit = SearchResult(title="t", url=raw, snippet="s")
+    deps = _deps(ctx, tmp_path, FakeSearch([hit]))
+    shown = (await web_search(_pai(deps), "q")).split(" — ")[1]
+    assert "fake-deepseek" not in shown
+    out = await read_page(_pai(deps), shown, "super")
+    assert out.startswith("<evidence") and route.called and "fake-deepseek" not in out
+    route.calls.reset()
+    links = await list_links(_pai(deps), shown)
+    assert route.called and not links.startswith("error")
 
 
 async def test_redirect_into_disallowed_path(ctx, tmp_path, respx_mock, data_net):
