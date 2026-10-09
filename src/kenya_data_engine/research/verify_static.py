@@ -163,7 +163,7 @@ def figure_checks(
     for r in refs:
         if not _contains(low, r.entity.lower()):
             problems.append(f"figure {r.label} is for {r.entity!r}, which the claim does not name")
-    found = directions(shown)
+    found = directions(shown, [cand.entity, *(r.entity for r in refs)])
     values = {f.id: f.value for f in fbook.figures}
     for r in refs:
         v = values.get(r.figure_id)

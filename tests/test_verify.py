@@ -7,7 +7,7 @@ from research_util import make_deps
 
 from kenya_data_engine.data.periods import parse_period
 from kenya_data_engine.data.stats import Figure, FigureBook
-from kenya_data_engine.research.claims import ClaimsOutput
+from kenya_data_engine.research.claims import ClaimsOutput, directions
 from kenya_data_engine.research.figures import FigurePack
 from kenya_data_engine.research.models import (
     Angle,
@@ -541,6 +541,10 @@ def test_figure_only_claims_are_checked(ctx, tmp_path):
     assert wrong.status == "refused" and any("direction" in r for r in wrong.reasons)
     wrong = one("Super in Nairobi jumped {F3}.", ["F3"])
     assert wrong.status == "refused" and any("direction" in r for r in wrong.reasons)
+    growth = one("Economic growth in Nairobi went {F3}.", ["F3"])
+    assert (
+        growth.reasons == [] and growth.text == "Economic growth in Nairobi went down 2.10 KES/L."
+    )
     mombasa = one("Super in Mombasa costs {F1}.", ["F1"], entity="Mombasa")
     assert mombasa.status == "refused" and not mombasa.entity_period_ok
     assert any("does not name" in r for r in mombasa.reasons)
@@ -669,3 +673,26 @@ def test_may_is_a_month_only_beside_a_number():
     assert _near_quote(p, "effective 4 may 2026")
     assert _near_quote(p, "as at may 2026")
     assert not _near_quote(p, "it may rise during 2026")
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["diplomat", "growth", "cutlery", "easement", "surgery", "fallow", "lowercase", "easy",
+     "east", "crisis", "risk", "against", "executive"],
+)  # fmt: skip
+def test_direction_stems_do_not_overmatch(text):
+    assert directions(text) == set()
+
+
+def test_direction_entity_names_are_ignored():
+    assert directions("Prices in Lower Kabete") == {"down"}
+    assert directions("Prices in Lower Kabete", ["lower kabete"]) == set()
+
+
+@pytest.mark.parametrize(
+    ("text", "want"),
+    [("rose", "up"), ("fell", "down"), ("is rising", "up"), ("cut", "down"),
+     ("eased", "down"), ("lower prices", "down")],
+)  # fmt: skip
+def test_direction_words_still_detected(text, want):
+    assert directions(text) == {want}

@@ -1,6 +1,7 @@
 """Claim writer: one call, no tools. The model writes templates; code renders every number."""
 
 import re
+from collections.abc import Iterable
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 
@@ -34,20 +35,27 @@ def claims_instructions(today: date) -> str:
 
 
 _UP = (
-    r"ris(?:e|es|en|ing)|rose|grow\w*|grew|surg\w*|jump\w*|climb\w*|gain\w*|increas\w*|"
-    r"higher|soar\w*|spik\w*"
+    r"rise|rises|rising|rose|risen|climb|climbs|climbed|climbing|grew|grows|growing|"
+    r"surge|surges|surged|surging|jump|jumps|jumped|jumping|gain|gains|gained|gaining|"
+    r"increase|increases|increased|increasing|higher|soar|soars|soared|soaring|"
+    r"spike|spikes|spiked|spiking"
 )
 _DOWN = (
-    r"fall\w*|fell|declin\w*|drop\w*|slid\w*|plung\w*|cut(?:s|ting)?|reduc\w*|cheap\w*|"
-    r"decreas\w*|lower|dip(?:s|ped|ping)?|slump\w*|eas(?:e|es|ed|ing)"
+    r"fall|falls|falling|fell|fallen|decline|declines|declined|declining|"
+    r"drop|drops|dropped|dropping|slid|slide|slides|sliding|plunge|plunges|plunged|plunging|"
+    r"cut|cuts|cutting|reduce|reduces|reduced|reducing|cheaper|"
+    r"decrease|decreases|decreased|decreasing|lower|dip|dips|dipped|dipping|"
+    r"slump|slumps|slumped|slumping|ease|eases|eased|easing"
 )
-UP_WORDS = re.compile(rf"\b(?:{_UP})", re.I)
-DOWN_WORDS = re.compile(rf"\b(?:{_DOWN})", re.I)
+UP_WORDS = re.compile(rf"\b(?:{_UP})\b", re.I)
+DOWN_WORDS = re.compile(rf"\b(?:{_DOWN})\b", re.I)
 CHANGE_KINDS = ("change", "pct_change", "yoy")
 
 
-def directions(text: str) -> set[str]:
-    """Direction stems found in `text`: a subset of {"up", "down"}."""
+def directions(text: str, entities: Iterable[str | None] = ()) -> set[str]:
+    """Direction words found in `text` (entity names removed first): a subset of {"up", "down"}."""
+    for entity in sorted({e for e in entities if e}, key=len, reverse=True):
+        text = re.sub(re.escape(entity), " ", text, flags=re.I)
     found = set()
     if UP_WORDS.search(text):
         found.add("up")
