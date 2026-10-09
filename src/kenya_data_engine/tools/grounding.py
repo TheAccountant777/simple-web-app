@@ -17,6 +17,12 @@ MIN_FUZZY_LEN = 20
 _NUMBER = re.compile(r"\d+(?:[.,]\d+)*%?")
 
 
+def _has_number(n: str, text: str) -> bool:
+    """True if `n` appears in `text` as a whole number token, not inside a longer one."""
+    pattern = r"(?<!\d)(?<!\d[.,])" + re.escape(n) + r"(?!\d)(?![.,]\d)"
+    return re.search(pattern, text) is not None
+
+
 def normalize(s: str) -> str:
     s = unicodedata.normalize("NFKC", s).translate(_TRANSLATE).casefold()
     return re.sub(r"\s+", " ", s).strip()
@@ -29,7 +35,7 @@ def quote_in_text(quote: str, text: str, threshold: float = 0.9) -> bool:
     t = normalize(text)
     if q in t:
         return True
-    if any(n not in t for n in _NUMBER.findall(q)):
+    if any(not _has_number(n, t) for n in _NUMBER.findall(q)):
         return False
     if len(q) < MIN_FUZZY_LEN or len(t) < len(q):
         return False

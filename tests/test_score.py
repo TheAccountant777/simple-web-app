@@ -88,7 +88,7 @@ async def test_score_cluster_computes_final_in_code(ctx):
         )
     }
     t = await score_cluster(c, sigs, ctx, model=function_model_returning(out))
-    assert t.id == signal_id(None, "Fuel")
+    assert t.id == signal_id(None, "Fuel|a1")
     assert t.final_score == weighted_score(t.scores, ctx.config.weights) == 3.55
     assert t.why_now == "CPI out Friday" and t.category == "personal_finance"
     assert "Fuel" in seen[0] and "a1 | news" in seen[0]
@@ -101,3 +101,22 @@ def test_score_prompt_has_primer_and_rubric():
     for key in DEFAULT_WEIGHTS:
         assert key in text
     assert "25 words" in text and "do not compute totals" in text
+
+
+async def test_same_title_clusters_get_unique_ids(ctx):
+    out = {
+        "data_ability": 3, "wallet_impact": 3, "timeliness": 3, "clarity_gap": 3,
+        "novelty": 3, "justification": {}, "why_now": "w",
+    }  # fmt: skip
+    fm = function_model_returning(out)
+    sigs = {
+        i: Signal(id=i, kind="news", title=i, source="x", url=None, published_at=None)
+        for i in ("a", "b")
+    }
+    t1 = await score_cluster(
+        Cluster(title="Same", summary="s", category="law", signal_ids=["a"]), sigs, ctx, model=fm
+    )
+    t2 = await score_cluster(
+        Cluster(title="Same", summary="s", category="law", signal_ids=["b"]), sigs, ctx, model=fm
+    )
+    assert t1.id != t2.id

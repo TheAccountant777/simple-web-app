@@ -45,7 +45,7 @@ async def score_cluster(
     agent: Agent[None, ScoreOutput] = Agent(
         output_type=ScoreOutput, instructions=load_prompt("score")
     )
-    tid = signal_id(None, cluster.title)
+    tid = signal_id(None, cluster.title + "|" + ",".join(sorted(cluster.signal_ids)))
     out = await run_agent(
         agent, prompt, ctx, stage="synthesize_score", name="score", topic_id=tid, model=model
     )

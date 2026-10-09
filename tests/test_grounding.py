@@ -43,3 +43,10 @@ def test_grounding_rejects_quote_longer_than_text():
     text = "inflation rose to 4.4 percent in september"
     quote = text + " and the shilling collapsed against the dollar"
     assert not quote_in_text(quote, text)
+
+
+def test_grounding_numbers_are_token_bounded():
+    text = "the rate rose to 19.5 percent in the latest monthly survey of banks"
+    assert not quote_in_text("rate rose to 9.5 percent in the latest monthly survey", text)
+    assert not quote_in_text("rate rose to 9 percent in the latest monthly survey", text)
+    assert quote_in_text("rate rose to 19.5 percent in the latest monthly survey", text)
