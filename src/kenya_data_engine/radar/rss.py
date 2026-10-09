@@ -45,6 +45,7 @@ class RssAdapter:
             ttl_hours=ctx.config.cache_ttl_hours,
             headers={"User-Agent": self.user_agent} if self.user_agent else None,
             aia=ctx.tls,
+            tracer=ctx.tracer,
         )
         feed = feedparser.parse(res.content)
         signals: list[Signal] = []

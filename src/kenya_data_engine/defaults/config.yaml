@@ -40,3 +40,6 @@ radar:
   lookahead_days: 21
   max_items: 10
   source_timeout_s: 20  # per source; sources themselves live in sources.yaml
+
+trace:
+  capture_llm: true  # write each LLM call to <run>/llm/*.json (redacted)

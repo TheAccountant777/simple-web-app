@@ -68,8 +68,10 @@ def record_health(ctx: RunContext, name: str, signals: int | None, error: str | 
 async def run_radar(adapters: list[Adapter], ctx: RunContext, since: datetime) -> RadarResult:
     async def one(adapter: Adapter) -> list[Signal] | AdapterError:
         try:
-            async with ctx.tracer.span("radar", "tool", adapter.name):
-                return await fetch_with_timeout(adapter, ctx, since)
+            async with ctx.tracer.span("radar", "tool", adapter.name) as attrs:
+                found = await fetch_with_timeout(adapter, ctx, since)
+                attrs["signals"] = len(found)
+                return found
         except Exception as exc:
             return AdapterError(
                 adapter=adapter.name, message=ctx.tracer.redact(str(exc) or type(exc).__name__)

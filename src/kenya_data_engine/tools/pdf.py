@@ -41,7 +41,11 @@ def _parse(content: bytes, wanted: list[int] | None) -> list[PdfPage]:
 async def read_pdf(url: str, ctx: RunContext, pages: list[int] | None = None) -> PdfText:
     async with ctx.tracer.span("tools", "tool", "read_pdf"):
         res = await fetch(
-            url, client=ctx.http, cache=ctx.cache, ttl_hours=ctx.config.cache_ttl_hours
+            url,
+            client=ctx.http,
+            cache=ctx.cache,
+            ttl_hours=ctx.config.cache_ttl_hours,
+            tracer=ctx.tracer,
         )
         try:
             parsed = await asyncio.to_thread(_parse, res.content, pages)

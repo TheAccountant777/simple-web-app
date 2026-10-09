@@ -87,6 +87,10 @@ class SynthConfig(_Strict):
     max_signals: int = 300
 
 
+class TraceConfig(_Strict):
+    capture_llm: bool = True
+
+
 class EngineConfig(_Strict):
     top_n: int = 5
     concurrency: int = 4
@@ -97,6 +101,7 @@ class EngineConfig(_Strict):
     radar: RadarConfig
     cache_ttl_hours: float = 6.0
     synth: SynthConfig = Field(default_factory=SynthConfig)
+    trace: TraceConfig = Field(default_factory=TraceConfig)
 
 
 def _deep_merge(base: dict[str, Any], over: dict[str, Any]) -> dict[str, Any]:

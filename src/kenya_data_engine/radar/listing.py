@@ -40,6 +40,7 @@ class ListingAdapter:
             ttl_hours=ctx.config.cache_ttl_hours,
             headers={"User-Agent": spec.user_agent} if spec.user_agent else None,
             aia=ctx.tls,
+            tracer=ctx.tracer,
         )
         tree = LexborHTMLParser(res.content.decode("utf-8", errors="replace"))
         # A union like `a tr, tr` returns a node once per branch that matches it.

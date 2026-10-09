@@ -1,10 +1,11 @@
 """JSONL tracing with cost accounting and a run budget."""
 
 import json
+import logging
 import re
 import time
 from collections import defaultdict
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Callable, Sequence
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -13,6 +14,8 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from kenya_data_engine.errors import BudgetExceeded
+
+log = logging.getLogger(__name__)
 
 _SECRET_KEY = re.compile(r"key|token|secret", re.IGNORECASE)
 
@@ -66,6 +69,7 @@ class Tracer:
         self._secrets = sorted((x for x in secrets if x), key=len, reverse=True)
         self.total_cost = 0.0
         self._events: list[TraceEvent] = []
+        self._subscribers: list[Callable[[TraceEvent], None]] = []
         self._seed_from_existing()
 
     def _seed_from_existing(self) -> None:
@@ -87,6 +91,19 @@ class Tracer:
         out: str = _redact(text, self._secrets)
         return out
 
+    def subscribe(self, fn: Callable[[TraceEvent], None]) -> Callable[[], None]:
+        """Call `fn` with every recorded (redacted) event; returns the unsubscribe function."""
+        self._subscribers.append(fn)
+
+        def unsubscribe() -> None:
+            if fn in self._subscribers:
+                self._subscribers.remove(fn)
+
+        return unsubscribe
+
+    def cost_of(self, input_tokens: int, output_tokens: int) -> float:
+        return (input_tokens * self.input_per_m + output_tokens * self.output_per_m) / 1_000_000
+
     @property
     def remaining_usd(self) -> float:
         return self.run_budget_usd - self.total_cost
@@ -101,6 +118,14 @@ class Tracer:
         with self.path.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(data, ensure_ascii=False) + "\n")
             fh.flush()
+        if self._subscribers:
+            safe = TraceEvent.model_validate(data)
+            for fn in list(self._subscribers):
+                try:
+                    fn(safe)
+                except Exception:
+                    self._subscribers.remove(fn)
+                    log.warning("trace subscriber %r raised; unsubscribed", fn, exc_info=True)
 
     def record_llm(
         self,
@@ -112,8 +137,9 @@ class Tracer:
         topic_id: str | None = None,
         status: Literal["ok", "error"] = "ok",
         error: str | None = None,
+        attrs: dict[str, Any] | None = None,
     ) -> float:
-        cost = (input_tokens * self.input_per_m + output_tokens * self.output_per_m) / 1_000_000
+        cost = self.cost_of(input_tokens, output_tokens)
         self.record(
             TraceEvent(
                 ts=datetime.now(UTC),
@@ -128,6 +154,7 @@ class Tracer:
                 output_tokens=output_tokens,
                 cost_usd=cost,
                 error=error,
+                attrs=attrs or {},
             )
         )
         return cost
@@ -139,11 +166,12 @@ class Tracer:
         kind: Literal["llm", "tool", "http", "stage"],
         name: str,
         topic_id: str | None = None,
-    ) -> AsyncIterator[None]:
+    ) -> AsyncIterator[dict[str, Any]]:
+        attrs: dict[str, Any] = {}
         start = time.perf_counter()
         error: str | None = None
         try:
-            yield
+            yield attrs
         except BaseException as exc:
             error = str(exc) or type(exc).__name__
             raise
@@ -159,6 +187,7 @@ class Tracer:
                     latency_ms=int((time.perf_counter() - start) * 1000),
                     topic_id=topic_id,
                     error=error,
+                    attrs=attrs,
                 )
             )
 

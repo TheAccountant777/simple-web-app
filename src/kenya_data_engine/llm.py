@@ -1,11 +1,15 @@
 """LLM layer: DeepSeek via Pydantic AI's OpenAI-compatible chat model."""
 
+import contextlib
+import json
 import time
 from importlib import resources
 from typing import Any
 
+from pydantic import BaseModel, TypeAdapter
 from pydantic_ai import Agent
 from pydantic_ai.exceptions import ModelAPIError, ModelHTTPError, UnexpectedModelBehavior
+from pydantic_ai.messages import ModelMessage
 from pydantic_ai.models import Model
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
@@ -81,6 +85,22 @@ def _friendly(exc: BaseException) -> EngineError | None:
     return None
 
 
+_MESSAGES = TypeAdapter(list[ModelMessage])
+
+
+def _write_capture(ctx: RunContext, payload: dict[str, Any], stage: str, name: str) -> str:
+    """Write one redacted exchange file under `<run>/llm/`; returns its file name."""
+    directory = ctx.run.dir / "llm"
+    directory.mkdir(exist_ok=True)
+    seq = max((int(p.name[:4]) for p in directory.glob("[0-9][0-9][0-9][0-9]-*.json")), default=0)
+    seq += 1
+    payload["seq"] = seq
+    filename = f"{seq:04d}-{stage}-{name}.json"
+    text = ctx.tracer.redact(json.dumps(payload, ensure_ascii=False, indent=2, default=str))
+    (directory / filename).write_text(text, encoding="utf-8")
+    return filename
+
+
 async def run_agent[T](
     agent: Agent[None, T],
     prompt: str,
@@ -98,16 +118,50 @@ async def run_agent[T](
     usage = RunUsage()
     start = time.perf_counter()
 
-    def record(status: str, error: str | None = None) -> None:
+    def record(
+        status: str,
+        error: str | None = None,
+        messages: list[Any] | None = None,
+        output: Any = None,
+    ) -> None:
+        latency = int((time.perf_counter() - start) * 1000)
+        attrs: dict[str, Any] = {}
+        if ctx.config.trace.capture_llm:
+            if messages is None:
+                messages = [
+                    {"kind": "request", "parts": [{"part_kind": "user-prompt", "content": prompt}]}
+                ]
+            payload = {
+                "stage": stage,
+                "name": name,
+                "topic_id": topic_id,
+                "model": getattr(use_model, "model_name", str(use_model)),
+                "settings": {
+                    "max_tokens": settings.get("max_tokens"),
+                    "extra_body": settings.get("extra_body"),
+                },
+                "messages": messages,
+                "output": output.model_dump(mode="json")
+                if isinstance(output, BaseModel)
+                else output,
+                "usage": {"input_tokens": usage.input_tokens, "output_tokens": usage.output_tokens},
+                "latency_ms": latency,
+                "cost_usd": ctx.tracer.cost_of(usage.input_tokens, usage.output_tokens),
+                "status": status,
+                "error": ctx.tracer.redact(error) if error else None,
+            }
+            with contextlib.suppress(OSError):  # diagnostics must never break a run
+                attrs["capture"] = _write_capture(ctx, payload, stage, name)
         ctx.tracer.record_llm(
             stage,
             name,
             usage.input_tokens,
             usage.output_tokens,
-            int((time.perf_counter() - start) * 1000),
+            latency,
             topic_id=topic_id,
             status="ok" if status == "ok" else "error",
             error=error,
+            attrs=attrs,
         )
 
     try:
@@ -118,6 +172,6 @@ async def run_agent[T](
         if friendly is not None:
             raise friendly from exc
         raise
-    record("ok")
     output: T = result.output
+    record("ok", messages=_MESSAGES.dump_python(result.all_messages(), mode="json"), output=output)
     return output

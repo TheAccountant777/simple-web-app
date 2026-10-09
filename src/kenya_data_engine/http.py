@@ -1,6 +1,9 @@
 """Cached, retrying HTTP fetch."""
 
+import time
+from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 from pydantic import BaseModel
@@ -17,6 +20,7 @@ from kenya_data_engine.cache import Cache
 from kenya_data_engine.errors import FetchError
 from kenya_data_engine.models import normalize_url
 from kenya_data_engine.tls import AiaFixer, is_incomplete_chain
+from kenya_data_engine.trace import TraceEvent, Tracer
 
 TIMEOUT_S = 20.0
 # Browser-like: some Kenyan WAFs (CBK, KRA) reject obviously non-browser agents.
@@ -86,10 +90,47 @@ async def fetch(
     ttl_hours: float,
     headers: dict[str, str] | None = None,
     aia: AiaFixer | None = None,
+    tracer: Tracer | None = None,
+) -> FetchResult:
+    """Fetch `url`; with a tracer, record one `http` event per call."""
+    info: dict[str, Any] = {"status": None, "from_cache": False, "bytes": 0, "attempts": 0}
+    start = time.perf_counter()
+    error: str | None = None
+    try:
+        return await _fetch(url, client, cache, ttl_hours, headers, aia, info)
+    except BaseException as exc:
+        error = str(exc) or type(exc).__name__
+        raise
+    finally:
+        if tracer is not None:
+            tracer.record(
+                TraceEvent(
+                    ts=datetime.now(UTC),
+                    run_id=tracer.run_id,
+                    stage="http",
+                    kind="http",
+                    name=urlsplit(url).hostname or url,
+                    status="ok" if error is None else "error",
+                    latency_ms=int((time.perf_counter() - start) * 1000),
+                    error=error,
+                    attrs={"url": tracer.redact(url), **info},
+                )
+            )
+
+
+async def _fetch(
+    url: str,
+    client: httpx.AsyncClient,
+    cache: Cache,
+    ttl_hours: float,
+    headers: dict[str, str] | None,
+    aia: AiaFixer | None,
+    info: dict[str, Any],
 ) -> FetchResult:
     key = normalize_url(url)
     hit = cache.get(key)
     if hit is not None:
+        info.update(status=200, from_cache=True, bytes=len(hit.content))
         return FetchResult(
             url=url, status=200, content=hit.content, content_type=hit.content_type, from_cache=True
         )
@@ -102,6 +143,7 @@ async def fetch(
             reraise=True,
         ):
             with attempt:
+                info["attempts"] += 1
                 resp = await _get(client, url, send)
     except _ServerError as exc:
         raise FetchError(
@@ -113,6 +155,7 @@ async def fetch(
         raise FetchError(
             f"transport error for {url}: {exc}", hint="check your network connection"
         ) from exc
+    info.update(status=resp.status_code, bytes=len(resp.content))
     if not resp.is_success:
         raise FetchError(f"{resp.status_code} for {url}")
     ctype = resp.headers.get("content-type", "")

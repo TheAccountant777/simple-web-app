@@ -33,7 +33,14 @@ async def fetch_page(url: str, ctx: RunContext) -> PageText:
     async with ctx.tracer.span("tools", "tool", "fetch_page"):
         text, title = "", None
         try:
-            res = await fetch(url, client=ctx.http, cache=ctx.cache, ttl_hours=ttl, aia=ctx.tls)
+            res = await fetch(
+                url,
+                client=ctx.http,
+                cache=ctx.cache,
+                ttl_hours=ttl,
+                aia=ctx.tls,
+                tracer=ctx.tracer,
+            )
             text, title = _extract(res.content.decode("utf-8", errors="replace"))
         except FetchError:
             pass  # fall through to the reader proxy
@@ -45,7 +52,12 @@ async def fetch_page(url: str, ctx: RunContext) -> PageText:
         if ctx.secrets.jina_api_key is not None:
             headers["Authorization"] = f"Bearer {ctx.secrets.jina_api_key.get_secret_value()}"
         res = await fetch(
-            JINA_BASE + url, client=ctx.http, cache=ctx.cache, ttl_hours=ttl, headers=headers
+            JINA_BASE + url,
+            client=ctx.http,
+            cache=ctx.cache,
+            ttl_hours=ttl,
+            headers=headers,
+            tracer=ctx.tracer,
         )
         body = res.content.decode("utf-8", errors="replace").strip()
         if len(body) < MIN_CHARS:
