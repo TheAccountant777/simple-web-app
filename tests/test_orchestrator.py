@@ -43,6 +43,7 @@ def brief_dict(needs=None, verdict="supported", **over):
                 "min_points": 2,
                 "priority": 1,
                 "series_hint": "wb:FP.CPI.TOTL.ZG",
+                "chart_concepts": ["c1"],
             }
         ],
         "verdict": verdict,
