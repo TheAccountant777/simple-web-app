@@ -154,3 +154,17 @@ def test_blank_secret_counts_as_missing(tmp_home):
     assert s.deepseek_api_key is None
     assert s.tavily_api_key is None
     assert s.serper_api_key is not None
+
+
+def test_unknown_top_level_key_rejected(tmp_home):
+    tmp_home.config_path.write_text("topn: 8\n")
+    with pytest.raises(ConfigError) as e:
+        load_config(tmp_home)
+    assert "topn" in e.value.message
+
+
+def test_unknown_nested_key_rejected(tmp_home):
+    tmp_home.config_path.write_text("budgets:\n  run_dollars: 1\nradar:\n  since_hour: 5\n")
+    with pytest.raises(ConfigError) as e:
+        load_config(tmp_home)
+    assert "run_dollars" in (e.value.hint or "") or "run_dollars" in e.value.message

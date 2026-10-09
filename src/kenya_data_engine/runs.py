@@ -55,9 +55,15 @@ class RunStore:
         return RunHandle(run_id, path)
 
     def open(self, run_id: str) -> RunHandle:
+        if not _RUN_ID.fullmatch(run_id):
+            raise EngineError(
+                f"invalid run id: {run_id!r}", hint="run ids look like YYYY-MM-DD-HHMM"
+            )
         path = self.runs_dir / run_id
         if not path.is_dir():
-            raise EngineError(f"run not found: {run_id}", hint="list runs with `engine runs`")
+            raise EngineError(
+                f"run not found: {run_id}", hint=f"existing runs are in {self.runs_dir}"
+            )
         return RunHandle(run_id, path)
 
     def list(self) -> list[str]:

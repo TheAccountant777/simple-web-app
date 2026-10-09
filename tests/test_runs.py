@@ -68,3 +68,17 @@ def test_open_latest_and_list(tmp_path):
 def test_open_missing_raises_engine_error(tmp_path):
     with pytest.raises(EngineError):
         RunStore(tmp_path).open("nope")
+
+
+def test_open_missing_run_hint_points_to_runs_dir(tmp_path):
+    with pytest.raises(EngineError) as e:
+        RunStore(tmp_path).open("2026-10-09-1405")
+    assert "engine runs" not in (e.value.hint or "") and str(tmp_path) in (e.value.hint or "")
+
+
+@pytest.mark.parametrize("bad", ["../x", "x", "2026-10-09", "", "/etc", "2026-10-09-1405/../.."])
+def test_open_rejects_invalid_run_id(tmp_path, bad):
+    (tmp_path.parent / "x").mkdir(exist_ok=True)
+    with pytest.raises(EngineError) as e:
+        RunStore(tmp_path).open(bad)
+    assert "invalid run id" in e.value.message and "YYYY-MM-DD-HHMM" in (e.value.hint or "")

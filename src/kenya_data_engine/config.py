@@ -5,7 +5,7 @@ from importlib import resources
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, Field, SecretStr, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from kenya_data_engine.errors import ConfigError
@@ -36,32 +36,38 @@ def load_secrets(home: EngineHome) -> Secrets:
     return Secrets(_env_file=home.env_path)
 
 
-class Pricing(BaseModel):
+class _Strict(BaseModel):
+    """Base for config models: unknown keys are errors, not silently ignored."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class Pricing(_Strict):
     input_per_m: float
     output_per_m: float
 
 
-class StageLLM(BaseModel):
+class StageLLM(_Strict):
     model: str
     max_tokens: int
     extra_body: dict[str, Any] = Field(default_factory=dict)
 
 
-class LLMConfig(BaseModel):
+class LLMConfig(_Strict):
     base_url: str
     pricing: Pricing
     stages: dict[str, StageLLM]
 
 
-class Budgets(BaseModel):
+class Budgets(_Strict):
     run_usd: float = 0.50
 
 
-class SearchConfig(BaseModel):
+class SearchConfig(_Strict):
     providers: list[str] = Field(default_factory=lambda: ["tavily", "serper"])
 
 
-class ListingSpec(BaseModel):
+class ListingSpec(_Strict):
     url: str
     item: str
     title: str
@@ -70,7 +76,7 @@ class ListingSpec(BaseModel):
     kind: SignalKind
 
 
-class RadarConfig(BaseModel):
+class RadarConfig(_Strict):
     since_hours: int = 72
     lookahead_days: int = 21
     max_items: int = 10
@@ -80,11 +86,11 @@ class RadarConfig(BaseModel):
     enabled: list[str]
 
 
-class SynthConfig(BaseModel):
+class SynthConfig(_Strict):
     max_signals: int = 300
 
 
-class EngineConfig(BaseModel):
+class EngineConfig(_Strict):
     top_n: int = 5
     concurrency: int = 4
     weights: dict[str, float]
@@ -128,7 +134,10 @@ def load_config(home: EngineHome) -> EngineConfig:
     try:
         cfg = EngineConfig.model_validate(merged)
     except ValidationError as exc:
-        raise ConfigError("invalid config", hint=str(exc)) from exc
+        first = exc.errors()[0]
+        where = ".".join(str(x) for x in first["loc"])
+        what = "unknown key" if first["type"] == "extra_forbidden" else first["msg"]
+        raise ConfigError(f"invalid config: {what} `{where}`", hint=str(exc)) from exc
     bad_values = any(not math.isfinite(v) or v < 0 for v in cfg.weights.values())
     if set(cfg.weights) != WEIGHT_KEYS or bad_values:
         raise ConfigError(
