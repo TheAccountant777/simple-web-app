@@ -41,7 +41,7 @@ class SdmxAdapter:
         if spec is None:
             return []
         try:
-            doc: Any = json.loads(content)
+            doc: Any = json.loads(content, parse_float=Decimal)
             body = doc.get("data", doc)
             datasets = body["dataSets"]
             structure = body.get("structure") or doc["structure"]
@@ -49,17 +49,18 @@ class SdmxAdapter:
             series: dict[str, Any] = datasets[0]["series"]
         except (ValueError, KeyError, IndexError, TypeError, AttributeError) as exc:
             raise ExtractError(f"{entry.key}: unexpected SDMX-JSON response shape") from exc
-        default_entity = str(entry.params.get("entity", "Kenya"))
+        fixed = entry.params.get("entity")  # an explicit label wins, for one series or many
         dims: list[Any] = (structure.get("dimensions") or {}).get("series") or []
 
         def entity_of(skey: str) -> str:
-            if len(series) == 1:
-                return default_entity
+            """Dimension labels (names, else ids) joined by "."; same rule for 1 or N series."""
+            if isinstance(fixed, str) and fixed:
+                return fixed
             try:
-                ids = [dims[i]["values"][int(part)]["id"] for i, part in enumerate(skey.split(":"))]
-            except (IndexError, KeyError, ValueError, TypeError):
-                return skey
-            return ".".join(str(x) for x in ids)
+                values = [dims[i]["values"][int(part)] for i, part in enumerate(skey.split(":"))]
+                return ".".join(str(v.get("name") or v["id"]) for v in values)
+            except (IndexError, KeyError, ValueError, TypeError, AttributeError):
+                return "Kenya" if len(series) == 1 else skey
 
         now = datetime.now(UTC)
         out: list[Observation] = []

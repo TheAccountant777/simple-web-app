@@ -91,7 +91,9 @@ class EvidenceBook:
         """Fetch through the data fetch policy, store the blob and text, return the evidence."""
         res = await policy_fetch(url, ctx, kind)
         content = res.content
-        sha = BlobStore(ctx.home.blobs_dir).put(content)
+        blobs = BlobStore(ctx.home.blobs_dir, ctx.home.db_path)
+        sha = blobs.put(content)
+        blobs.ref(sha, f"evidence:{ctx.run.run_id}")  # gc must not reap what a brief cites
         key = (url, sha, tuple(pdf_pages or ()))
         if key in self._keys:
             return self._keys[key]

@@ -101,3 +101,11 @@ async def test_redacts_secrets_in_text(respx_mock, ctx, data_net, tmp_path):
     ev = await book.add_url("https://www.epra.go.ke/s", ctx)
     assert "fake-deepseek" not in book.text(ev)
     assert "fake-deepseek" not in (tmp_path / ev.text_path).read_text()
+
+
+async def test_add_url_records_a_blob_ref_for_gc(respx_mock, ctx, data_net, tmp_path):
+    from kenya_data_engine.data.store import BlobStore
+
+    respx_mock.get("https://www.epra.go.ke/p").respond(200, content=_html(LONG, LONG + " Again."))
+    ev = await EvidenceBook(tmp_path, TIERS).add_url("https://www.epra.go.ke/p", ctx)
+    assert ev.blob_sha256 in BlobStore.referenced(ctx.home.db_path)

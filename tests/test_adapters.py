@@ -387,3 +387,47 @@ async def test_policy_fetch_limits_requests_per_domain(ctx, respx_mock):
     ctx.config.data.per_domain_concurrency = 2
     await asyncio.gather(*(policy_fetch(f"https://slow.ke/{n}", ctx, "page") for n in range(6)))
     assert peak == 2
+
+
+def _sdmx_doc(series: dict, dims: list | None) -> bytes:
+    structure: dict = {"dimensions": {"observation": [{"values": [{"id": "2025-01"}]}]}}
+    if dims is not None:
+        structure["dimensions"]["series"] = dims
+    return json.dumps({"data": {"dataSets": [{"series": series}], "structure": structure}}).encode()
+
+
+async def test_sdmx_entity_uses_labels_for_one_series_or_many(ctx):
+    dims = [{"values": [{"id": "KEN", "name": "Kenya"}, {"id": "UGA", "name": "Uganda"}]}]
+    adapter, entry = ADAPTERS["sdmx"], _sdmx_entry()
+    (item,) = await adapter.discover(entry, ctx)
+    one = await adapter.observations(
+        entry, item, _sdmx_doc({"0": {"observations": {"0": [1]}}}, dims), "s", ctx
+    )
+    two = await adapter.observations(
+        entry,
+        item,
+        _sdmx_doc({"0": {"observations": {"0": [1]}}, "1": {"observations": {"0": [2]}}}, dims),
+        "s",
+        ctx,
+    )
+    assert [o.entity for o in one] == ["Kenya"]
+    assert sorted(o.entity for o in two) == ["Kenya", "Uganda"]
+    fixed = entry.model_copy(update={"params": {**entry.params, "entity": "Nairobi"}})
+    both = await adapter.observations(
+        fixed, item, _sdmx_doc({"0": {"observations": {"0": [1]}}}, dims), "s", ctx
+    )
+    assert [o.entity for o in both] == ["Nairobi"]
+
+
+async def test_json_floats_parse_as_exact_decimals(ctx):
+    doc = _sdmx_doc({"0": {"observations": {"0": [0]}}}, None).replace(
+        b'"0": [0]', b'"0": [0.30000000000000004999]'
+    )
+    adapter, entry = ADAPTERS["sdmx"], _sdmx_entry()
+    (item,) = await adapter.discover(entry, ctx)
+    (o,) = await adapter.observations(entry, item, doc, "s", ctx)
+    assert o.value == Decimal("0.30000000000000004999")
+    wb = (await _catalog(ctx))["wb:FP.CPI.TOTL.ZG"]
+    rows = b'[{"page": 1}, [{"date": "2020", "value": 1.10000000000000009}]]'  # beyond float
+    (w,) = await ADAPTERS["worldbank"].observations(wb, Discovered(url="u"), rows, "s", ctx)
+    assert str(w.value) == "1.10000000000000009"

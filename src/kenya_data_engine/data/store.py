@@ -18,10 +18,33 @@ from kenya_data_engine.data.periods import Period
 _SHA = re.compile(r"[0-9a-f]{64}")
 
 
+_BLOB_REFS = "CREATE TABLE IF NOT EXISTS blob_refs (sha TEXT, owner TEXT, PRIMARY KEY (sha, owner))"
+
+
 class BlobStore:
-    def __init__(self, root: Path) -> None:
+    """Content-addressed files. `db_path` (the engine database) holds `blob_refs`: blobs that
+    something other than a stored observation (e.g. a research run's evidence) depends on."""
+
+    def __init__(self, root: Path, db_path: Path | None = None) -> None:
         self.root = root
+        self.db_path = db_path
         root.mkdir(parents=True, exist_ok=True)
+
+    def ref(self, sha: str, owner: str) -> None:
+        """Record that `owner` (e.g. "evidence:<run id>") needs this blob; gc keeps it."""
+        self.path(sha)  # validates the digest
+        if self.db_path is None:
+            raise ValueError("BlobStore.ref needs a db_path")
+        with closing(sqlite3.connect(self.db_path, timeout=30)) as conn, conn:
+            conn.execute(_BLOB_REFS)
+            conn.execute("INSERT OR IGNORE INTO blob_refs (sha, owner) VALUES (?, ?)", (sha, owner))
+
+    @staticmethod
+    def referenced(db_path: Path) -> set[str]:
+        """Every sha recorded through `ref`, whatever its owner."""
+        with closing(sqlite3.connect(db_path, timeout=30)) as conn, conn:
+            conn.execute(_BLOB_REFS)
+            return {r[0] for r in conn.execute("SELECT DISTINCT sha FROM blob_refs")}
 
     def path(self, sha: str) -> Path:
         if not _SHA.fullmatch(sha):
@@ -32,6 +55,7 @@ class BlobStore:
         sha = hashlib.sha256(content).hexdigest()
         target = self.path(sha)
         if target.exists():
+            os.utime(target)  # a re-fetched blob is fresh again: gc ages by last use
             return sha
         target.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp = tempfile.mkstemp(dir=target.parent, prefix=".tmp-")
@@ -47,16 +71,23 @@ class BlobStore:
     def get(self, sha: str) -> bytes:
         return self.path(sha).read_bytes()
 
-    def prune(self, older_than: timedelta, keep: set[str]) -> int:
-        """Delete blobs not in `keep` whose mtime is older than `older_than`."""
+    def prune(self, older_than: timedelta, keep: set[str], *, dry_run: bool = False) -> list[Path]:
+        """Delete blobs not in `keep` whose mtime is older than `older_than`.
+
+        Returns the paths removed (with `dry_run`, the paths that would be)."""
         cutoff = time.time() - older_than.total_seconds()
-        removed = 0
-        for f in self.root.glob("*/*"):
+        removed: list[Path] = []
+        for f in sorted(self.root.glob("*/*")):
             if f.name.startswith(".tmp-") or f.name in keep or not f.is_file():
                 continue
-            if f.stat().st_mtime < cutoff:
-                f.unlink()
-                removed += 1
+            try:
+                if f.stat().st_mtime >= cutoff:
+                    continue
+                if not dry_run:
+                    f.unlink()
+            except FileNotFoundError:  # raced with another gc
+                continue
+            removed.append(f)
         return removed
 
 

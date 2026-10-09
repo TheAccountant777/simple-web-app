@@ -145,7 +145,7 @@ async def fetch_series(key: str, ctx: RunContext, *, limit: int = 12) -> FetchOu
         return FetchOutcome(
             key=key, discovered=len(found), fetched=0, added=None, report=None, error=None
         )
-    blobs, store = BlobStore(ctx.home.blobs_dir), SeriesStore(ctx.home.db_path)
+    blobs, store = BlobStore(ctx.home.blobs_dir, ctx.home.db_path), SeriesStore(ctx.home.db_path)
     errors: list[str] = []
     reports: list[tuple[str, CheckReport]] = []
     items: list[ItemOutcome] = []

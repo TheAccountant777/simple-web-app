@@ -1,9 +1,7 @@
-"""`engine gc`: prune old blobs that no stored observation references."""
+"""`engine gc`: prune old blobs that no stored observation or recorded reference needs."""
 
 import re
-import time
 from datetime import timedelta
-from pathlib import Path
 from typing import Annotated
 
 import typer
@@ -23,18 +21,6 @@ def parse_age(text: str) -> timedelta:
     return timedelta(**{_UNITS[m[2]]: int(m[1])})
 
 
-def _candidates(root: Path, older_than: timedelta, keep: set[str]) -> list[Path]:
-    cutoff = time.time() - older_than.total_seconds()
-    return [
-        f
-        for f in root.glob("*/*")
-        if f.is_file()
-        and not f.name.startswith(".tmp-")
-        and f.name not in keep
-        and f.stat().st_mtime < cutoff
-    ]
-
-
 @guarded
 def gc(
     ctx: typer.Context,
@@ -43,7 +29,7 @@ def gc(
     ] = "90d",
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Do not ask for confirmation.")] = False,
 ) -> None:
-    """Delete blobs older than the cutoff that no stored observation references.
+    """Delete blobs older than the cutoff that no stored observation or evidence references.
 
     \b
     Examples:
@@ -53,14 +39,19 @@ def gc(
     state = get_state(ctx)
     age = parse_age(older_than)
     state.home.ensure()
-    blobs = BlobStore(state.home.blobs_dir)
-    keep = SeriesStore(state.home.db_path).referenced_blobs()
-    doomed = _candidates(blobs.root, age, keep)
-    freed = sum(f.stat().st_size for f in doomed)
+    blobs = BlobStore(state.home.blobs_dir, state.home.db_path)
+    keep = SeriesStore(state.home.db_path).referenced_blobs() | BlobStore.referenced(
+        state.home.db_path
+    )
+    doomed = blobs.prune(age, keep, dry_run=True)
     if not doomed:
         console.print("[muted]Nothing to prune.[/]")
         return
-    if not yes and not typer.confirm(f"Delete {len(doomed)} blob(s), {freed:,} bytes?"):
+    sizes = {f: f.stat().st_size for f in doomed if f.exists()}
+    if not yes and not typer.confirm(
+        f"Delete {len(doomed)} blob(s), {sum(sizes.values()):,} bytes?"
+    ):
         raise typer.Exit(1)
     removed = blobs.prune(age, keep)
-    console.print(f"Pruned {removed} blob(s), freed {freed:,} bytes.")
+    freed = sum(sizes.get(f, 0) for f in removed)
+    console.print(f"Pruned {len(removed)} blob(s), freed {freed:,} bytes.")

@@ -191,3 +191,47 @@ def test_data_fetch_shows_quarantined_items_with_reasons(cli, respx_mock, tmp_ho
     assert "quarantined" in r.output and "above maximum 1" in r.output
     items = json.loads(run(cli, "data", "fetch", "wb:FP.CPI.TOTL.ZG", "--json").output)["items"]
     assert items[0]["status"] == "quarantined" and items[0]["sha256"]
+
+
+def test_data_show_csv_neutralises_scraped_entities(cli, tmp_home) -> None:
+    SeriesStore(tmp_home.db_path).add(
+        [
+            Observation(
+                series="wb:FP.CPI.TOTL.ZG",
+                period=year(2020),
+                entity="=cmd()",
+                metric="inflation",
+                value=-3,
+                unit="pct",
+                provenance=Provenance(
+                    url="https://e.org/x",
+                    blob_sha256="a",
+                    retrieved_at=datetime.now(UTC),
+                    locator="l",
+                    extractor="e",
+                ),
+            )
+        ]
+    )
+    lines = run(cli, "data", "show", "wb:FP.CPI.TOTL.ZG", "--csv").output.splitlines()
+    assert lines[1] == "2020,'=cmd(),inflation,-3,pct,,e.org"
+
+
+def test_gc_keeps_blobs_referenced_by_evidence(cli, tmp_home):
+    blobs = BlobStore(tmp_home.blobs_dir, tmp_home.db_path)
+    cited, orphan = blobs.put(b"cited"), blobs.put(b"orphan")
+    long_ago = time.time() - 200 * 86400
+    for sha in (cited, orphan):
+        os.utime(blobs.path(sha), (long_ago, long_ago))
+    blobs.ref(cited, "evidence:2026-10-09-0800")
+    r = run(cli, "gc", "--yes")
+    assert r.exit_code == 0 and "Pruned 1 blob(s), freed 6 bytes" in r.output
+    assert blobs.path(cited).exists() and not blobs.path(orphan).exists()
+
+
+def test_catalog_probe_sends_the_adapters_headers(cli, respx_mock, tmp_home):
+    tmp_home.catalog_path.write_text("imf:cpi:\n  enabled: true\n")
+    route = respx_mock.get(host="data.imf.org").respond(200, json={"data": {}})
+    r = run(cli, "catalog", "probe", "imf:cpi")
+    assert r.exit_code == 0 and route.called
+    assert route.calls.last.request.headers["accept"] == "application/json"

@@ -41,7 +41,7 @@ class WorldBankAdapter:
             return []
         indicator = _indicator(entry)
         try:
-            payload: Any = json.loads(content)
+            payload: Any = json.loads(content, parse_float=Decimal)
             meta = payload[0]
             if isinstance(meta, dict) and meta.get("message"):
                 raise ExtractError(f"{entry.key}: World Bank error: {meta['message']}")

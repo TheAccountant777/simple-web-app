@@ -4,6 +4,8 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
+import pytest
+
 from kenya_data_engine.data.models import Observation, Provenance
 from kenya_data_engine.data.periods import month
 from kenya_data_engine.data.store import AddResult, BlobStore, SeriesStore
@@ -79,7 +81,7 @@ def test_prune_keeps_referenced(tmp_path: Path) -> None:
     old = time.time() - 86400 * 40
     for sha in (keep, drop):
         os.utime(b.path(sha), (old, old))
-    assert b.prune(timedelta(days=30), {keep}) == 1
+    assert len(b.prune(timedelta(days=30), {keep})) == 1
     assert b.path(keep).exists() and b.path(fresh).exists()
     assert not b.path(drop).exists()
 
@@ -116,3 +118,39 @@ def test_blob_path_validates_sha(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError):
         BlobStore(tmp_path).path("../etc/passwd")
+
+
+def test_put_hit_touches_mtime(tmp_path: Path) -> None:
+    b = BlobStore(tmp_path / "blobs")
+    sha = b.put(b"x")
+    old = time.time() - 86400 * 40
+    os.utime(b.path(sha), (old, old))
+    assert b.put(b"x") == sha
+    assert b.path(sha).stat().st_mtime > time.time() - 60
+    assert b.prune(timedelta(days=30), set()) == []
+
+
+def test_prune_returns_paths_and_dry_run_deletes_nothing(tmp_path: Path) -> None:
+    b = BlobStore(tmp_path / "blobs")
+    sha = b.put(b"old")
+    old = time.time() - 86400 * 40
+    os.utime(b.path(sha), (old, old))
+    assert b.prune(timedelta(days=30), set(), dry_run=True) == [b.path(sha)]
+    assert b.path(sha).exists()
+    assert b.prune(timedelta(days=30), set()) == [b.path(sha)]
+    assert not b.path(sha).exists()
+
+
+def test_blob_refs_roundtrip_is_idempotent(tmp_path: Path) -> None:
+    db = tmp_path / "e.db"
+    b = BlobStore(tmp_path / "blobs", db)
+    sha = b.put(b"cited")
+    assert BlobStore.referenced(db) == set()
+    b.ref(sha, "evidence:r1")
+    b.ref(sha, "evidence:r1")
+    b.ref(sha, "evidence:r2")
+    assert BlobStore.referenced(db) == {sha}
+    with pytest.raises(ValueError):
+        b.ref("../x", "o")
+    with pytest.raises(ValueError, match="db_path"):
+        BlobStore(tmp_path / "blobs").ref(sha, "o")

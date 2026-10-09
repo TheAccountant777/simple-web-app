@@ -1,7 +1,6 @@
 """`engine data`: list the series catalog, fetch a series, show stored values."""
 
 import asyncio
-import csv
 import json
 import sys
 from typing import Annotated
@@ -13,6 +12,7 @@ from rich.text import Text
 
 from kenya_data_engine.cli.common import State, get_state, guarded, probe_context
 from kenya_data_engine.cli.ui import badge, console
+from kenya_data_engine.data.csvsafe import write_csv
 from kenya_data_engine.data.registry import FetchOutcome, fetch_series, get_entry, load_catalog
 from kenya_data_engine.data.store import SeriesStore
 
@@ -166,9 +166,7 @@ def show(
         for r in rows
     ]
     if csv_out:
-        writer = csv.writer(sys.stdout, lineterminator="\n")
-        writer.writerow(header)
-        writer.writerows(body)
+        sys.stdout.write(write_csv(body, header))
         return
     if not body:
         console.print(

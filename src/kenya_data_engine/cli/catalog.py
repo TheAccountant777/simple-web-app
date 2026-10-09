@@ -72,7 +72,9 @@ async def probe_entry(entry: CatalogEntry, ctx: RunContext, save_dir: Path | Non
     log: list[str] = []
     token = FETCH_LOG.set(log)
     try:
-        items = await ADAPTERS[entry.adapter].discover(entry, ctx)
+        adapter = ADAPTERS[entry.adapter]
+        headers = getattr(adapter, "headers", None)  # the same headers a real fetch sends
+        items = await adapter.discover(entry, ctx)
         res.final_url = log[0] if log else None
         res.links_found = len(items)
         res.links = [i.url for i in items[:SHOWN_LINKS]]
@@ -83,7 +85,7 @@ async def probe_entry(entry: CatalogEntry, ctx: RunContext, save_dir: Path | Non
             if n and save_dir is None:
                 break
             try:
-                page = await policy_fetch(item.url, ctx, "item")
+                page = await policy_fetch(item.url, ctx, "item", headers)
                 kind = sniff(page.content)
                 if n == 0:
                     res.sniffed = kind
