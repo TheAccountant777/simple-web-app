@@ -20,6 +20,7 @@ from kenya_data_engine.report import (
     enabled_source_names,
     load_run_metrics,
 )
+from kenya_data_engine.research.dossier import DossierInfo, list_dossiers
 from kenya_data_engine.runs import RunStore
 
 _BARS = "▁▂▃▄▅▆▇█"
@@ -124,6 +125,31 @@ def aggregate_view(agg: Aggregate) -> list[Panel | Table | Text]:
     ]
 
 
+def research_view(rows: list[DossierInfo]) -> list[Panel | Table | Text]:
+    """Cost per dossier, facts per dollar and gap rate for the latest dossiers."""
+    table = _table("Research", "Dossier", "Verdict", "Facts", "Cost", "Facts/$", "Gap rate")
+    for d in rows:
+        per = "-" if d.facts_per_usd is None else f"{d.facts_per_usd:.1f}"
+        table.add_row(
+            f"{d.date.isoformat()}/{d.path.name}",
+            d.verdict,
+            str(d.facts),
+            f"${d.usd:.4f}",
+            per,
+            f"{d.gap_rate:.0%}",
+        )
+    usd = sum(d.usd for d in rows)
+    facts = sum(d.facts for d in rows)
+    gap = sum(d.gap_rate for d in rows) / len(rows)
+    total = Text(
+        f"{len(rows)} dossiers · ${usd:.4f} in total · "
+        + (f"{facts / usd:.1f} facts per dollar" if usd > 0 else "no cost recorded")
+        + f" · mean gap rate {gap:.0%}",
+        style="muted",
+    )
+    return [table, total]
+
+
 @guarded
 def report(
     ctx: typer.Context,
@@ -158,6 +184,7 @@ def report(
             console.print("No runs yet — run `engine run`.")
         return
     budget = load_config(state.home).budgets.run_usd
+    dossiers = list_dossiers(state.home.briefs_dir)[:last]
     runs = [load_run_metrics(store.open(i), budget) for i in reversed(ids)]  # oldest first
     agg = build_report(runs, only=enabled_source_names(state.home))
     if json_out:
@@ -165,7 +192,12 @@ def report(
             "runs": [r.model_dump(mode="json") for r in runs],
             "aggregate": agg.model_dump(mode="json"),
         }
+        if dossiers:  # the key appears only once there is research to report
+            payload["research"] = [d.model_dump(mode="json") for d in dossiers]
         typer.echo(json.dumps(payload, indent=2))
         return
     for part in run_view(runs[0]) if run_id else aggregate_view(agg):
         console.print(part)
+    if dossiers and not run_id:
+        for part in research_view(dossiers):
+            console.print(part)

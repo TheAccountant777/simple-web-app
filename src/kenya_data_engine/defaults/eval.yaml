@@ -1,0 +1,16 @@
+# Acceptance scenarios for `engine eval` (spec section 12). Merge by name: a file of the same
+# shape at <home>/eval.yaml overrides or adds scenarios. Expectations that are left out are not
+# checked: expect_verdict (a list), min_facts, max_usd, max_credits.
+scenarios:
+  fuel:
+    topic: "Kenya fuel pump prices this month and the VAT on fuel"
+    expect_verdict: [supported, reframed]
+    min_facts: 2
+  cbk_rate:
+    topic: "Central Bank of Kenya base rate decision"
+    min_facts: 1
+    max_credits: 10
+  weak:
+    topic: "Kenyans love tea more than coffee"
+    expect_verdict: [reject, reframed]
+    max_usd: 0.05

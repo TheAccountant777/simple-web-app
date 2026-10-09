@@ -108,6 +108,45 @@ engine gc [--older-than 90d] [--yes]         # prune blobs no stored row referen
 links found and the sniffed type of the first item, and with `--save-samples` keeps up to two
 items per key plus `probe.json` for writing a parser.
 
+### `engine research`, `engine dossiers`, `engine memory`, `engine eval`
+
+Takes one topic to a checked dossier. The topic is a rank from the latest `engine run`, a
+`<run-id>:<topic-id>`, or free text. The planner reads it and decides whether it can be answered
+with Kenyan data (`supported`, `reframed` or `reject`); scouts then find sources in rounds, code
+computes every figure, a claim writer drafts claims that must quote their source exactly, and the
+claims are verified before anything is called a fact. Progress prints one line per step, need and
+claim, with the budget gauge after each step.
+
+```
+engine research 1                                # top topic of the latest run, standard budget
+engine research "Kenya fuel prices and VAT" --budget lean
+engine research 2 --plan-only                    # the plan and the verdict; no dossier
+engine research 1 --force                        # research even if the planner rejects it
+engine research --resume 2026-10-09-1530         # continue after a crash (TOPIC is remembered)
+engine research 1 --json > outcome.json          # JSON on stdout; progress goes to stderr
+engine dossiers list [--json]                    # date, NN, slug, verdict, facts, cost
+engine dossiers show latest                      # or NN-slug, or a folder path
+engine memory list [--json]                      # remembered sources and covered topics
+engine memory forget "<signature>"               # as printed by `memory list`
+engine eval [--only NAME] [--budget lean]        # acceptance scenarios, compared with the last run
+```
+
+Needs the DeepSeek key and one search key. Exit code 0 means a dossier was written (a rejected or
+partial one counts); 1 means an error. Budgets are `lean`, `standard` and `deep` (dollars, search
+credits and seconds, in `research.presets`); when the money or time runs low the dossier is still
+written from what was found, and its scorecard says why the run stopped.
+
+A dossier lives in `~/.kenya-data-engine/briefs/<date>/NN-<slug>/`: `README.md` (verdict, the top
+facts with a source link and page, chart concepts marked ready, partial or not possible, gaps,
+scorecard and a 15-minute check list), `brief.md`, `data/*.csv`, `stats.md`, `sources.json`,
+`gaps.md`, `research/claims.json`, `research/comparisons.csv`, `research/verification.md` and
+`dossier.json`. A rejected topic gets only the README, `brief.md` and `dossier.json`.
+
+`engine eval` runs the scenarios in `defaults/eval.yaml` (`fuel`, `cbk_rate`, `weak`; add or
+override with `~/.kenya-data-engine/eval.yaml`), spends real money and credits, stores each result
+in the `eval_runs` table and exits 1 if any scenario misses its expectations. `engine report`
+also prints a Research section: cost per dossier, facts per dollar and gap rate.
+
 ## Engine Room (TUI) and comparing runs
 
 ```bash
@@ -150,7 +189,8 @@ config.yaml   sources.yaml   calendar.yaml   .env   engine.db   certs/   runs/<Y
 chain (see [Troubleshooting](#troubleshooting)). `engine.db` also holds the HTTP cache and the
 per-source health table.
 
-Each run directory holds `signals.json` (Radar), `topics.json` (Synthesize), `trace.jsonl` (every
+A research run directory holds `research/` (one checkpoint per step, `evidence.json` and the
+fetched texts) instead. Each `engine run` directory holds `signals.json` (Radar), `topics.json` (Synthesize), `trace.jsonl` (every
 span and LLM call with tokens and cost) and `summary.json`. A truncated or corrupt artifact counts
 as missing, so `--resume` simply re-runs that stage.
 

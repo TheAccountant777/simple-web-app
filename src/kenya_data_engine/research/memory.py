@@ -164,6 +164,14 @@ class TopicMemory:
             best = days if best is None else min(best, days)
         return best
 
+    def entries(self) -> list[dict[str, Any]]:
+        with closing(_connect(self.db_path)) as conn:
+            rows = conn.execute(
+                "SELECT title, dossier_path, created FROM topic_memory "
+                "ORDER BY created DESC, rowid DESC"
+            ).fetchall()
+        return [{"title": t, "dossier_path": p, "created": c} for t, p, c in rows]
+
 
 def code_novelty(days: int | None, novelty_days: list[int]) -> int | None:
     """Novelty ceiling from recency: `<= 14` days gives 1, `<= 30` gives 3, older gives None.

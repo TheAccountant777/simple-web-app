@@ -366,8 +366,6 @@ class _Research:
         fbook, pack = figures_for(brief.data_needs, state.statuses, self.store, tiers, generic)
         self.ctx.run.write("research/figures", pack)
         self.step("figures", "done", f"{len(fbook.figures)} figures")
-        for status in state.statuses:
-            _say(self.on_event, "need", status)
         return fbook, (pack if pack.refs else None)
 
     async def claims_step(

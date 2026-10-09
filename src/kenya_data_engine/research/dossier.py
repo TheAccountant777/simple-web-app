@@ -626,3 +626,55 @@ def write_dossier(
         blobs.ref(sha, f"dossier:{root}")  # gc must not reap what a dossier cites
     TopicMemory(ctx.home.db_path).record(title, str(root), today)
     return root
+
+
+# --- listing ------------------------------------------------------------------------------------
+
+
+class DossierInfo(BaseModel):
+    date: date
+    nn: int
+    slug: str
+    path: Path
+    topic: str
+    verdict: str
+    facts: int
+    usd: float
+    credits: int
+    gap_rate: float
+    facts_per_usd: float | None
+
+
+def list_dossiers(briefs_dir: Path) -> list[DossierInfo]:
+    """Every readable dossier under `briefs_dir`, newest first (date, then NN)."""
+    found: list[DossierInfo] = []
+    for day in sorted(briefs_dir.glob("*-*-*")):
+        try:
+            when = date.fromisoformat(day.name)
+        except ValueError:
+            continue
+        for folder in sorted(p for p in day.iterdir() if p.is_dir()):
+            m = _DATE_DIR.match(folder.name)
+            try:
+                doc = DossierDoc.model_validate_json(
+                    (folder / "dossier.json").read_text(encoding="utf-8")
+                )
+            except (OSError, ValueError):
+                continue
+            sc = doc.scorecard
+            found.append(
+                DossierInfo(
+                    date=when,
+                    nn=int(m[1]) if m else 0,
+                    slug=folder.name.split("-", 1)[-1],
+                    path=folder,
+                    topic=doc.topic,
+                    verdict=doc.verdict,
+                    facts=int(sc.get("facts", 0)),
+                    usd=float(sc.get("usd_spent", 0.0)),
+                    credits=int(sc.get("credits_spent", 0)),
+                    gap_rate=float(sc.get("gap_rate", 0.0)),
+                    facts_per_usd=sc.get("facts_per_usd"),
+                )
+            )
+    return sorted(found, key=lambda d: (d.date, d.nn), reverse=True)
