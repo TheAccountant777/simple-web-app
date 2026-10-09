@@ -6,7 +6,8 @@ from typing import Protocol
 
 from kenya_data_engine.config import EngineConfig, load_sources
 from kenya_data_engine.context import RunContext
-from kenya_data_engine.errors import ConfigError, EngineError
+from kenya_data_engine.errors import ConfigError, EngineError, FetchError
+from kenya_data_engine.health import HealthStore
 from kenya_data_engine.home import EngineHome
 from kenya_data_engine.models import AdapterError, RadarResult, Signal, normalize_url
 from kenya_data_engine.radar.calendar import CalendarAdapter
@@ -40,11 +41,35 @@ def dedupe(signals: list[Signal]) -> list[Signal]:
     return out
 
 
+async def fetch_with_timeout(adapter: Adapter, ctx: RunContext, since: datetime) -> list[Signal]:
+    """Run one source under `radar.source_timeout_s`; a hang becomes a FetchError."""
+    limit = ctx.config.radar.source_timeout_s
+    try:
+        return await asyncio.wait_for(adapter.fetch(ctx, since), timeout=limit)
+    except TimeoutError as exc:
+        raise FetchError(
+            f"{adapter.name}: timed out after {limit:g}s",
+            hint="the site is slow or unreachable; raise radar.source_timeout_s or disable it",
+        ) from exc
+
+
+def record_health(ctx: RunContext, name: str, signals: int | None, error: str | None) -> int:
+    """Update a source's health row; returns its consecutive failures. Never raises."""
+    try:
+        store = HealthStore(ctx.home.db_path)
+        if error is None:
+            store.record_ok(name, signals or 0)
+            return 0
+        return store.record_failure(name, ctx.tracer.redact(error))
+    except Exception:
+        return 0  # health is bookkeeping; it must never break a run
+
+
 async def run_radar(adapters: list[Adapter], ctx: RunContext, since: datetime) -> RadarResult:
     async def one(adapter: Adapter) -> list[Signal] | AdapterError:
         try:
             async with ctx.tracer.span("radar", "tool", adapter.name):
-                return await adapter.fetch(ctx, since)
+                return await fetch_with_timeout(adapter, ctx, since)
         except Exception as exc:
             return AdapterError(
                 adapter=adapter.name, message=ctx.tracer.redact(str(exc) or type(exc).__name__)
@@ -53,11 +78,13 @@ async def run_radar(adapters: list[Adapter], ctx: RunContext, since: datetime) -
     results = await asyncio.gather(*(one(a) for a in adapters))
     signals: list[Signal] = []
     errors: list[AdapterError] = []
-    for r in results:
+    for adapter, r in zip(adapters, results, strict=True):
         if isinstance(r, AdapterError):
             errors.append(r)
+            record_health(ctx, adapter.name, None, r.message)
         else:
             signals.extend(r)
+            record_health(ctx, adapter.name, len(r), None)
     unique = dedupe(signals)
     unique.sort(
         key=lambda s: (

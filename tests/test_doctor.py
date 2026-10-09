@@ -10,6 +10,7 @@ from kenya_data_engine.cli import doctor as doctor_mod
 from kenya_data_engine.cli.app import app
 from kenya_data_engine.cli.doctor import Check, checks_table, run_checks, summary_line
 from kenya_data_engine.config import load_sources
+from kenya_data_engine.health import HealthStore, failing_label
 
 MODELS = "https://api.deepseek.com/models"
 TAVILY = "https://api.tavily.com/search"
@@ -87,6 +88,33 @@ async def test_doctor_source_exception_becomes_fail_check(respx_mock, ctx):
     assert checks["nation"].status == "fail"
     assert "fake-tavily" not in checks["nation"].detail  # secrets redacted
     assert checks["standard"].status == "ok"
+
+
+async def test_doctor_shows_consecutive_failures_and_records_health(respx_mock, ctx):
+    mock_healthy(respx_mock, ctx)
+    nation = load_sources(ctx.home).specs["nation"].url
+    respx_mock.get(nation).respond(404)
+    first = by_name(await run_checks(ctx))["nation"]
+    second = by_name(await run_checks(ctx))["nation"]
+    assert first.status == "fail" and failing_label(1) in first.detail
+    assert failing_label(2) in second.detail and "404" in second.detail
+    rows = HealthStore(ctx.home.db_path).all()
+    assert rows["nation"].consecutive_failures == 2 and rows["standard"].consecutive_failures == 0
+
+
+async def test_doctor_source_timeout_uses_source_timeout(respx_mock, ctx):
+    import asyncio
+
+    mock_healthy(respx_mock, ctx)
+    ctx.config.radar.source_timeout_s = 0.05
+
+    async def slow(request):
+        await asyncio.sleep(1)
+        return httpx.Response(200, text="x")
+
+    respx_mock.get(load_sources(ctx.home).specs["nation"].url).mock(side_effect=slow)
+    c = by_name(await run_checks(ctx))["nation"]
+    assert c.status == "fail" and "timed out after 0.05s" in c.detail
 
 
 async def test_doctor_empty_source_warns(respx_mock, ctx):

@@ -17,7 +17,8 @@ from kenya_data_engine.cli.common import State, get_state, guarded
 from kenya_data_engine.cli.ui import badge, console, err_console
 from kenya_data_engine.context import RunContext, open_context
 from kenya_data_engine.errors import ConfigError
-from kenya_data_engine.radar.base import build_adapters
+from kenya_data_engine.health import failing_label
+from kenya_data_engine.radar.base import Adapter, build_adapters, fetch_with_timeout, record_health
 from kenya_data_engine.runs import RunHandle
 from kenya_data_engine.tools.search import build_search
 
@@ -134,10 +135,17 @@ async def _search_probe(ctx: RunContext) -> tuple[Status, str]:
     return "ok", f"{len(results)} result: {results[0].title[:50]}"
 
 
-def _source_probe(ctx: RunContext, adapter: object) -> Callable[[], Awaitable[tuple[Status, str]]]:
+def _source_probe(ctx: RunContext, adapter: Adapter) -> Callable[[], Awaitable[tuple[Status, str]]]:
     async def probe() -> tuple[Status, str]:
         since = datetime.now(UTC) - timedelta(days=30)
-        signals = await adapter.fetch(ctx, since)  # type: ignore[attr-defined]
+        try:
+            signals = await fetch_with_timeout(adapter, ctx, since)
+        except Exception as exc:
+            detail = str(exc) or type(exc).__name__
+            hint = getattr(exc, "hint", None)
+            failing = record_health(ctx, adapter.name, None, detail)
+            return "fail", f"{detail}{f' ({hint})' if hint else ''} · {failing_label(failing)}"
+        record_health(ctx, adapter.name, len(signals), None)
         if not signals:
             return "warn", "0 signals in the last 30 days (feed empty or selectors stale?)"
         return "ok", f"{len(signals)} signal{'' if len(signals) == 1 else 's'}"
