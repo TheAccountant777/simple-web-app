@@ -1,4 +1,4 @@
-# World-class data journalism: global benchmarks, mapped to our pipeline
+# World-class data journalism: global benchmarks, reframed for Jijenga
 
 **Date:** 2026-10-09. **Purpose:** Turn the practices of the best data newsrooms into concrete rules for
 the three stages of the Kenya Data Engine pipeline:
@@ -271,7 +271,7 @@ Series make the engine's calendar signals directly productive and train an audie
 
 ---
 
-## 6. Quality gates, run as two separate passes
+## 6. Quality gates, run as two separate passes (automated first, then a ~15-minute human check)
 
 **Evidence gate (blocking; owned by the engine plus an editorial check):**
 - [ ] Every number appears in `stats.md` or `claims.json`, with source, vintage and formula.
