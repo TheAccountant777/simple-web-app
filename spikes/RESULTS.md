@@ -24,3 +24,13 @@ hand-built fixtures with real captures), then fix URLs/selectors in
 | Parliament bills | listing | `radar.listings.parliament` | item `table tbody tr`, title/link `td a`, date `td:nth-child(2)` | unverified |
 
 No adapter is marked `deferred`.
+
+## Spike 1: Pydantic AI over DeepSeek
+
+Not run live (no DeepSeek key). Built against the installed pydantic-ai-slim 2.54.0 instead:
+`pydantic_ai.models.openai.OpenAIChatModel` with
+`pydantic_ai.providers.openai.OpenAIProvider(base_url=config.llm.base_url, api_key=...)`, so the
+base URL stays configurable. Stage `max_tokens` and `extra_body` pass through `ModelSettings`.
+Tests use `pydantic_ai.models.function.FunctionModel`; the structured output is returned as a
+tool call to `info.output_tools[0]`. Live behaviour (reasoning/`extra_body` flags, tool-call
+output with deepseek-flash) is unverified until a key is available.

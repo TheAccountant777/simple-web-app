@@ -38,3 +38,28 @@ async def ctx(tmp_home, monkeypatch):
 async def ctx_no_keys(tmp_home):
     async for c in _open(tmp_home):
         yield c
+
+
+def function_model_returning(output):
+    """FunctionModel answering every request with the structured-output tool call.
+
+    `output` is a BaseModel/dict, or a callable `(prompt_text) -> BaseModel | dict`
+    (it may raise to simulate a failing model call).
+    """
+    from pydantic import BaseModel
+    from pydantic_ai.messages import ModelRequest, ModelResponse, ToolCallPart
+    from pydantic_ai.models.function import AgentInfo, FunctionModel
+
+    def _prompt(messages) -> str:
+        parts = []
+        for m in messages:
+            if isinstance(m, ModelRequest):
+                parts.extend(str(getattr(p, "content", "")) for p in m.parts)
+        return "\n".join(parts)
+
+    def fn(messages, info: AgentInfo) -> ModelResponse:
+        out = output(_prompt(messages)) if callable(output) else output
+        args = out.model_dump() if isinstance(out, BaseModel) else out
+        return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, args)])
+
+    return FunctionModel(fn)
