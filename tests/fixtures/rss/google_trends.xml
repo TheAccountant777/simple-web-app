@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss xmlns:ht="https://trends.google.com/trending/rss" version="2.0">
+  <channel>
+    <title>Daily Search Trends</title>
+    <description>Recent searches trending in Kenya</description>
+    <link>https://trends.google.com/trending?geo=KE</link>
+    <item>
+      <title>kenya power tokens</title>
+      <ht:approx_traffic>2K+</ht:approx_traffic>
+      <description></description>
+      <link>https://trends.google.com/trending/rss?geo=KE</link>
+      <pubDate>Fri, 09 Oct 2026 07:20:00 +0300</pubDate>
+      <ht:news_item>
+        <ht:news_item_title>Kenya Power Tokens news</ht:news_item_title>
+        <ht:news_item_url>https://example.co.ke/kenya-power-tokens</ht:news_item_url>
+      </ht:news_item>
+    </item>
+    <item>
+      <title>harambee stars</title>
+      <ht:approx_traffic>20K+</ht:approx_traffic>
+      <description></description>
+      <link>https://trends.google.com/trending/rss?geo=KE</link>
+      <pubDate>Fri, 09 Oct 2026 06:00:00 +0300</pubDate>
+      <ht:news_item>
+        <ht:news_item_title>Harambee Stars news</ht:news_item_title>
+        <ht:news_item_url>https://example.co.ke/harambee-stars</ht:news_item_url>
+      </ht:news_item>
+    </item>
+    <item>
+      <title>sha contributions</title>
+      <ht:approx_traffic>5K+</ht:approx_traffic>
+      <description></description>
+      <link>https://trends.google.com/trending/rss?geo=KE</link>
+      <pubDate>Thu, 08 Oct 2026 21:00:00 +0300</pubDate>
+      <ht:news_item>
+        <ht:news_item_title>Sha Contributions news</ht:news_item_title>
+        <ht:news_item_url>https://example.co.ke/sha-contributions</ht:news_item_url>
+      </ht:news_item>
+    </item>
+  </channel>
+</rss>

@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>The Star Kenya</title>
+    <link>https://www.the-star.co.ke</link>
+    <description>The Star Kenya (hand-built fixture)</description>
+    <item>
+      <title>MPs question Sh2 trillion pending bills</title>
+      <link>https://www.the-star.co.ke/news/2026-10-09-mps-question-pending-bills</link>
+      <guid isPermaLink="true">https://www.the-star.co.ke/news/2026-10-09-mps-question-pending-bills</guid>
+      <pubDate>Fri, 09 Oct 2026 04:30:00 +0300</pubDate>
+      <description>The Public Accounts Committee wants an audit.</description>
+    </item>
+    <item>
+      <title>Pump prices: what motorists should expect</title>
+      <link>https://www.the-star.co.ke/business/2026-10-08-pump-prices-outlook</link>
+      <guid isPermaLink="true">https://www.the-star.co.ke/business/2026-10-08-pump-prices-outlook</guid>
+      <pubDate>Thu, 08 Oct 2026 16:45:00 +0300</pubDate>
+      <description>EPRA will announce the next review on the 14th.</description>
+    </item>
+    <item>
+      <title>SHA rollout hit by hospital payment delays</title>
+      <link>https://www.the-star.co.ke/news/2026-10-07-sha-payment-delays</link>
+      <guid isPermaLink="true">https://www.the-star.co.ke/news/2026-10-07-sha-payment-delays</guid>
+      <pubDate>Wed, 07 Oct 2026 11:15:00 +0300</pubDate>
+      <description>Private hospitals say claims are unpaid.</description>
+    </item>
+  </channel>
+</rss>

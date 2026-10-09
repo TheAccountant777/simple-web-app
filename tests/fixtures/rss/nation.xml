@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Nation - Kenya</title>
+    <link>https://nation.africa/kenya</link>
+    <description>Nation - Kenya (hand-built fixture)</description>
+    <item>
+      <title>Treasury lifts domestic borrowing target as revenue lags</title>
+      <link>https://nation.africa/kenya/business/treasury-lifts-borrowing-target-5001</link>
+      <guid isPermaLink="true">https://nation.africa/kenya/business/treasury-lifts-borrowing-target-5001</guid>
+      <pubDate>Fri, 09 Oct 2026 06:30:00 +0300</pubDate>
+      <description>The National Treasury has raised its domestic borrowing target by Sh120 billion after revenue collection fell short.</description>
+    </item>
+    <item>
+      <title>Maize prices ease as harvest hits the market</title>
+      <link>https://nation.africa/kenya/news/maize-prices-ease-5002</link>
+      <guid isPermaLink="true">https://nation.africa/kenya/news/maize-prices-ease-5002</guid>
+      <pubDate>Thu, 08 Oct 2026 18:10:00 +0300</pubDate>
+      <description>&lt;p&gt;Millers say a 90-kg bag of maize has dropped to &lt;b&gt;Sh3,600&lt;/b&gt; in the Rift Valley.&lt;/p&gt;</description>
+    </item>
+    <item>
+      <title>Matatu fares rise after fuel review</title>
+      <link>https://nation.africa/kenya/news/matatu-fares-rise-5003</link>
+      <guid isPermaLink="true">https://nation.africa/kenya/news/matatu-fares-rise-5003</guid>
+      <pubDate>Wed, 07 Oct 2026 09:00:00 +0300</pubDate>
+      <description>Commuters in Nairobi face higher fares.</description>
+    </item>
+  </channel>
+</rss>

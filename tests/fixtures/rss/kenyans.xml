@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Kenyans.co.ke - News</title>
+    <link>https://www.kenyans.co.ke</link>
+    <description>Kenyans.co.ke - News (hand-built fixture)</description>
+    <item>
+      <title>KRA Announces New Rules for Filing Returns</title>
+      <link>https://www.kenyans.co.ke/news/100001-kra-new-rules</link>
+      <guid isPermaLink="true">https://www.kenyans.co.ke/news/100001-kra-new-rules</guid>
+      <pubDate>Fri, 09 Oct 2026 08:05:00 +0300</pubDate>
+      <description>KRA has published guidelines ahead of the deadline.</description>
+    </item>
+    <item>
+      <title>NSSF Contributions: What Changes This Month</title>
+      <link>https://www.kenyans.co.ke/news/100002-nssf-contributions</link>
+      <guid isPermaLink="true">https://www.kenyans.co.ke/news/100002-nssf-contributions</guid>
+      <pubDate>Thu, 08 Oct 2026 14:40:00 +0300</pubDate>
+      <description>Employers must remit higher rates.</description>
+    </item>
+    <item>
+      <title>Fuel Prices to Change on October 14</title>
+      <link>https://www.kenyans.co.ke/news/100003-fuel-prices-october</link>
+      <guid isPermaLink="true">https://www.kenyans.co.ke/news/100003-fuel-prices-october</guid>
+      <pubDate>Wed, 07 Oct 2026 19:00:00 +0300</pubDate>
+      <description>Analysts expect a marginal increase.</description>
+    </item>
+  </channel>
+</rss>
