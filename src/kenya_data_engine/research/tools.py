@@ -90,7 +90,7 @@ def _registry_urls(deps: ResearchDeps) -> set[str]:
     return out
 
 
-def _allowed(deps: ResearchDeps, url: str) -> bool:
+def url_allowed(deps: ResearchDeps, url: str) -> bool:
     if url in deps.book.seen_urls:
         return True
     norm = normalize_url(url)
@@ -102,7 +102,7 @@ def _allowed(deps: ResearchDeps, url: str) -> bool:
 _ROBOTS = "error: disallowed by robots.txt"
 
 
-async def _robots_blocked(deps: ResearchDeps, url: str) -> bool:
+async def robots_blocked(deps: ResearchDeps, url: str) -> bool:
     if normalize_url(url) in _registry_urls(deps):
         return False  # registry sources are polled by the data layer under its own rules
     return not await robots_allowed(url, deps.ctx)
@@ -138,11 +138,11 @@ async def web_search(ctx: Ctx, query: str, domains: list[str] | None = None) -> 
 async def read_page(ctx: Ctx, url: str, focus: str) -> str:
     """Read an HTML page or PDF. Returns an <evidence> packet with passages relevant to `focus`."""
     deps = ctx.deps
-    if not _allowed(deps, url):
+    if not url_allowed(deps, url):
         _note(deps, f"read_page {url}: rejected, unknown url")
         return _UNKNOWN_URL
     try:
-        if await _robots_blocked(deps, url):
+        if await robots_blocked(deps, url):
             _note(deps, f"read_page {url}: disallowed by robots.txt")
             return _ROBOTS
         ev = await deps.book.add_url(url, deps.ctx)
@@ -155,11 +155,11 @@ async def read_page(ctx: Ctx, url: str, focus: str) -> str:
 async def list_links(ctx: Ctx, url: str, contains: str = "") -> str:
     """List links on a page (at most 40), optionally only those containing `contains`."""
     deps = ctx.deps
-    if not _allowed(deps, url):
+    if not url_allowed(deps, url):
         _note(deps, f"list_links {url}: rejected, unknown url")
         return _UNKNOWN_URL
     try:
-        if await _robots_blocked(deps, url):
+        if await robots_blocked(deps, url):
             _note(deps, f"list_links {url}: disallowed by robots.txt")
             return _ROBOTS
         res = await policy_fetch(url, deps.ctx, "page")
@@ -191,11 +191,11 @@ async def list_links(ctx: Ctx, url: str, contains: str = "") -> str:
 async def preview_table(ctx: Ctx, url: str, page: int | None = None, table_index: int = 0) -> str:
     """Show the header and first rows of a table, to choose a locator (not to read values)."""
     deps = ctx.deps
-    if not _allowed(deps, url):
+    if not url_allowed(deps, url):
         _note(deps, f"preview_table {url}: rejected, unknown url")
         return _UNKNOWN_URL
     try:
-        if await _robots_blocked(deps, url):
+        if await robots_blocked(deps, url):
             _note(deps, f"preview_table {url}: disallowed by robots.txt")
             return _ROBOTS
         res = await policy_fetch(url, deps.ctx, "item")

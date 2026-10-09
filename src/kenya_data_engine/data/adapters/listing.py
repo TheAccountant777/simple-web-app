@@ -39,7 +39,7 @@ def _shown(text: str) -> str:
     return repr(text if len(text) <= 40 else text[:37] + "...")
 
 
-def _cell_unit(spec_unit: str, parsed_unit: str) -> str:
+def cell_unit(spec_unit: str, parsed_unit: str) -> str:
     """The unit a cell states for itself (R12: KES, USD, pct) or the series unit if it states none.
 
     A compound series unit ("KES/L") already contains the stated currency, so it is kept.
@@ -171,7 +171,7 @@ class ListingAdapter:
                         entity=entity,
                         metric=metric,
                         value=parsed.value,
-                        unit=_cell_unit(spec.unit, parsed.unit),
+                        unit=cell_unit(spec.unit, parsed.unit),
                         provenance=Provenance(
                             url=item.final_url or item.url,
                             blob_sha256=sha,
