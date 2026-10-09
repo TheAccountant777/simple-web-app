@@ -34,6 +34,18 @@ def _redact(value: Any, secrets: Sequence[str] = ()) -> Any:
     return value
 
 
+def scrub_values(value: Any, secrets: Sequence[str] = ()) -> Any:
+    """Mask secret values inside nested data; unlike `_redact` it leaves every key alone."""
+    if isinstance(value, dict):
+        return {k: scrub_values(v, secrets) for k, v in value.items()}
+    if isinstance(value, list | tuple):
+        return [scrub_values(v, secrets) for v in value]
+    if isinstance(value, str):
+        for secret in secrets:
+            value = value.replace(secret, "***")
+    return value
+
+
 class TraceEvent(BaseModel):
     ts: datetime
     run_id: str
@@ -91,6 +103,10 @@ class Tracer:
         out: str = _redact(text, self._secrets)
         return out
 
+    def redact_data(self, value: Any) -> Any:
+        """Mask configured secret values anywhere in nested data (keys are kept)."""
+        return scrub_values(value, self._secrets)
+
     def subscribe(self, fn: Callable[[TraceEvent], None]) -> Callable[[], None]:
         """Call `fn` with every recorded (redacted) event; returns the unsubscribe function."""
         self._subscribers.append(fn)
@@ -124,7 +140,8 @@ class Tracer:
                 try:
                     fn(safe)
                 except Exception:
-                    self._subscribers.remove(fn)
+                    if fn in self._subscribers:  # it may have unsubscribed itself first
+                        self._subscribers.remove(fn)
                     log.warning("trace subscriber %r raised; unsubscribed", fn, exc_info=True)
 
     def record_llm(

@@ -2,6 +2,7 @@
 
 import contextlib
 import json
+import logging
 import time
 from importlib import resources
 from typing import Any
@@ -18,6 +19,8 @@ from pydantic_ai.usage import RunUsage
 
 from kenya_data_engine.context import RunContext
 from kenya_data_engine.errors import ConfigError, EngineError
+
+log = logging.getLogger(__name__)
 
 _PRIMER_MARKER = "{{primer}}"
 
@@ -96,7 +99,9 @@ def _write_capture(ctx: RunContext, payload: dict[str, Any], stage: str, name: s
     seq += 1
     payload["seq"] = seq
     filename = f"{seq:04d}-{stage}-{name}.json"
-    text = ctx.tracer.redact(json.dumps(payload, ensure_ascii=False, indent=2, default=str))
+    # Redact values first: JSON escaping can hide a secret from the text pass.
+    safe = ctx.tracer.redact_data(payload)
+    text = ctx.tracer.redact(json.dumps(safe, ensure_ascii=False, indent=2, default=str))
     (directory / filename).write_text(text, encoding="utf-8")
     return filename
 
@@ -121,16 +126,20 @@ async def run_agent[T](
     def record(
         status: str,
         error: str | None = None,
-        messages: list[Any] | None = None,
+        result: Any = None,
         output: Any = None,
     ) -> None:
         latency = int((time.perf_counter() - start) * 1000)
         attrs: dict[str, Any] = {}
         if ctx.config.trace.capture_llm:
-            if messages is None:
-                messages = [
-                    {"kind": "request", "parts": [{"part_kind": "user-prompt", "content": prompt}]}
-                ]
+            messages: list[Any] = [
+                {"kind": "request", "parts": [{"part_kind": "user-prompt", "content": prompt}]}
+            ]
+            if result is not None:
+                try:
+                    messages = _MESSAGES.dump_python(result.all_messages(), mode="json")
+                except Exception:  # a dump problem must never fail a successful call
+                    log.warning("could not serialise LLM messages for capture", exc_info=True)
             payload = {
                 "stage": stage,
                 "name": name,
@@ -165,13 +174,15 @@ async def run_agent[T](
         )
 
     try:
-        result: Any = await agent.run(prompt, model=use_model, model_settings=settings, usage=usage)
+        run_result: Any = await agent.run(
+            prompt, model=use_model, model_settings=settings, usage=usage
+        )
     except BaseException as exc:
         record("error", str(exc) or type(exc).__name__)
         friendly = _friendly(exc)
         if friendly is not None:
             raise friendly from exc
         raise
-    output: T = result.output
-    record("ok", messages=_MESSAGES.dump_python(result.all_messages(), mode="json"), output=output)
+    output: T = run_result.output
+    record("ok", result=run_result, output=output)
     return output

@@ -38,3 +38,9 @@ def test_report_json_shape(tmp_home):
     assert data["runs"][0]["run_id"] == "2026-10-09-0900"
     assert data["runs"][0]["llm"]["calls"] == 2
     assert data["aggregate"]["runs"] == 1
+
+
+def test_report_json_empty_home_is_valid_json(tmp_home):
+    r = runner.invoke(app, ["--home", str(tmp_home.root), "report", "--json"])
+    data = json.loads(r.stdout)
+    assert r.exit_code == 0 and data["runs"] == [] and data["aggregate"]["runs"] == 0

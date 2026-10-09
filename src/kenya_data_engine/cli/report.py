@@ -5,6 +5,7 @@ from typing import Annotated
 
 import typer
 from rich import box
+from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
@@ -129,7 +130,15 @@ def report(
     store = RunStore(state.home.runs_dir)
     ids = [run_id] if run_id else store.list()[:last]
     if not ids:
-        console.print("No runs yet — run `engine run`.")
+        if json_out:  # keep stdout machine-readable; the hint goes to stderr
+            typer.echo(
+                json.dumps(
+                    {"runs": [], "aggregate": build_report([]).model_dump(mode="json")}, indent=2
+                )
+            )
+            Console(stderr=True).print("No runs yet — run `engine run`.")
+        else:
+            console.print("No runs yet — run `engine run`.")
         return
     budget = load_config(state.home).budgets.run_usd
     runs = [load_run_metrics(store.open(i), budget) for i in reversed(ids)]  # oldest first

@@ -67,8 +67,8 @@ class Aggregate(BaseModel):
 
 def _read_events(run: RunHandle) -> list[TraceEvent]:
     try:
-        lines = run.trace_path.read_text(encoding="utf-8").splitlines()
-    except OSError:
+        lines = run.trace_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except (OSError, ValueError):
         return []
     events: list[TraceEvent] = []
     for line in lines:

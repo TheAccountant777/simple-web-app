@@ -103,3 +103,16 @@ async def test_radar_span_records_signal_count(ctx):
     ctx.tracer.subscribe(events.append)
     await run_radar([A()], ctx, since=T0)
     assert events[0].attrs["signals"] == 0
+
+
+def test_subscriber_that_unsubscribes_then_raises_is_safe(tmp_path):
+    tracer = Tracer(tmp_path / "t.jsonl", "r", 1.0, 1.0, 1.0)
+    holder = []
+
+    def bad(event):
+        holder[0]()
+        raise RuntimeError("boom")
+
+    holder.append(tracer.subscribe(bad))
+    tracer.record_llm("s", "n", 1, 1, 1)  # must not raise ValueError from list.remove
+    tracer.record_llm("s", "n", 1, 1, 1)

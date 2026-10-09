@@ -63,3 +63,11 @@ def test_source_success_rate_across_runs(tmp_path):
 def test_run_metrics_serialises(tmp_path):
     m = load_run_metrics(make_run(tmp_path), 0.5)
     assert RunMetrics.model_validate(json.loads(m.model_dump_json())) == m
+
+
+def test_invalid_utf8_trace_is_tolerated(tmp_path):
+    run = make_run(tmp_path)
+    good = run.trace_path.read_bytes()
+    run.trace_path.write_bytes(b"\xff\xfe\x80 junk\n" + good)
+    m = load_run_metrics(run, 0.5)
+    assert m.complete and m.llm.calls == 2

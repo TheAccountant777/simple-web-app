@@ -69,3 +69,34 @@ async def test_capture_disabled_writes_nothing(ctx):
     await call(ctx)
     assert not (ctx.run.dir / "llm").exists()
     assert "capture" not in traced_llm(ctx)[0]["attrs"]
+
+
+class _BrokenDump:
+    def dump_python(self, *a, **k):
+        raise TypeError("cannot serialise")
+
+
+async def test_message_dump_failure_never_fails_the_call(ctx, monkeypatch):
+    monkeypatch.setattr("kenya_data_engine.llm._MESSAGES", _BrokenDump())
+    assert (await call(ctx)).answer == "x"
+    (f,) = (ctx.run.dir / "llm").glob("*.json")
+    data = json.loads(f.read_text())
+    assert data["status"] == "ok" and data["messages"]  # falls back to the prompt alone
+    assert traced_llm(ctx)[0]["status"] == "ok"
+
+
+async def test_messages_not_dumped_when_capture_off(ctx, monkeypatch):
+    monkeypatch.setattr("kenya_data_engine.llm._MESSAGES", _BrokenDump())
+    ctx.config.trace.capture_llm = False
+    assert (await call(ctx)).answer == "x"
+
+
+async def test_capture_redacts_values_before_json_escaping(ctx):
+    tricky = 'sk-"quoted"\\key'  # JSON escaping would hide this from a text-only pass
+    ctx.tracer._secrets.append(tricky)
+    await call(ctx, f"use {tricky} now", model=function_model_returning(Out(answer=tricky)))
+    (f,) = (ctx.run.dir / "llm").glob("*.json")
+    data = json.loads(f.read_text())
+    assert tricky not in json.dumps(data) and data["output"] == {"answer": "***"}
+    assert data["settings"]["max_tokens"] == 4096  # keys such as *_tokens stay intact
+    assert data["usage"]["input_tokens"] > 0
