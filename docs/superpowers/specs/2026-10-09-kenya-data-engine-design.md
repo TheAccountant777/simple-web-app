@@ -200,6 +200,37 @@ engine report [RUN_ID]                      cost, time, failures, source stats
 engine eval [--suite default]               run eval suite against fixed topics
 ```
 
+### 6.1 CLI and TUI experience
+
+The tool should feel like a polished product, not a script.
+
+- **Typer + Rich CLI:**
+  - Coloured, structured output with consistent styling for status, errors, panels, tables and confidence badges.
+  - `--help` on every command with examples.
+  - `--json` on read commands for scripting.
+  - `--verbose` and `--quiet` flags.
+- **Live run view:** `engine run` shows a Rich live dashboard while it runs:
+  - per-stage progress
+  - per-topic agent status (thinking, searching, fetching, verifying, done or failed)
+  - running cost against the budget
+  - signal, topic and dataset counts
+- **End-of-run summary:** ranked topics with confidence badges, cost, time, failures and the dossier path.
+- **`engine init`:** an interactive first-run wizard. It asks for and validates the API keys, writes `.env` and the default `config.yaml` and `calendar.yaml`, then runs `engine doctor`.
+- **`engine doctor`:** a checklist table showing the status, latency and last error for each key, adapter and provider.
+- **`engine browse` (TUI, built with Textual):**
+  - Browse runs and dossiers: a topic list with scores and badges, then that topic's brief, stats, data previews, sources and gaps.
+  - Keyboard driven, with a filter and search.
+  - Opens a file or folder in the system viewer.
+- **Errors:** human-readable messages with a suggested fix, for example "TAVILY_API_KEY missing — run `engine init`". Full tracebacks appear only with `--verbose`.
+
+### 6.2 Installation
+
+- Packaged as a standard Python project, `pyproject.toml` with a console script `engine`.
+- **One-line install:** `uv tool install git+<repo-url>`, with `pipx` as an alternative.
+- **For development:** `uv sync` then `make check`. The `Makefile` targets are `install`, `test`, `lint`, `fmt`, `typecheck`, `check` and `eval`.
+- User data lives in a configurable home directory, default `~/.kenya-data-engine/`, holding `config.yaml`, `calendar.yaml`, `.env`, `engine.db`, `runs/` and `briefs/`. It can be overridden with `ENGINE_HOME`.
+- **Quality gates:** ruff (lint and format), mypy (strict on core models), pytest with coverage, pre-commit hooks, and GitHub Actions CI running `make check` on every push.
+
 ---
 
 ## 7. Configuration
@@ -252,7 +283,9 @@ engine eval [--suite default]               run eval suite against fixed topics
 | Web extraction | httpx plus trafilatura, with Jina Reader as the fallback |
 | PDF | pdfplumber, plus Docling for complex tables |
 | Data and storage | pandas, SQLite |
-| CLI and config | Typer, pydantic-settings, PyYAML |
+| CLI and config | Typer, Rich, pydantic-settings, PyYAML |
+| TUI | Textual |
+| Quality | ruff, mypy, pytest + pytest-cov + pytest-asyncio + respx (HTTP mocking), pre-commit, GitHub Actions |
 | Tracing | JSONL, with optional OTel export |
 
 ### Early validation spikes (throwaway)
@@ -286,7 +319,7 @@ These are assumptions, to be measured in the first runs. A 5-topic run uses abou
 
 ## 13. Build order (for the implementation plan)
 
-1. Project skeleton: models, config, tracing, cache, CLI shell, stage I/O, orchestrator with resume.
+1. Project skeleton: packaging, quality gates, CI, models, config and home directory, tracing, cache, Rich CLI shell and `engine init`, stage I/O, orchestrator with resume.
 2. Validation spikes 1–3.
 3. Toolbelt: search, fetch, PDF, grounding matcher.
 4. Radar: RSS, calendar, CBK, KNBS, EPRA, Parliament, Google Trends.
@@ -296,3 +329,4 @@ These are assumptions, to be measured in the first runs. A 5-topic run uses abou
 8. Dossier.
 9. Memory integration.
 10. `doctor`, `report` and `eval`.
+11. Live run dashboard and the `engine browse` TUI.
