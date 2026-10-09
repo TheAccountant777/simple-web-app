@@ -14,8 +14,7 @@ def tmp_home(tmp_path, monkeypatch) -> EngineHome:
     return home
 
 
-@pytest_asyncio.fixture
-async def ctx(tmp_home):
+async def _open(tmp_home):
     from datetime import datetime
 
     from kenya_data_engine.context import open_context
@@ -23,4 +22,19 @@ async def ctx(tmp_home):
 
     run = RunStore(tmp_home.runs_dir).new_run(datetime(2026, 10, 9, 8, 0))
     async with open_context(tmp_home, run) as c:
+        yield c
+
+
+@pytest_asyncio.fixture
+async def ctx(tmp_home, monkeypatch):
+    """Context with fake API keys for every provider."""
+    for key in ("DEEPSEEK", "TAVILY", "SERPER", "JINA"):
+        monkeypatch.setenv(f"{key}_API_KEY", f"fake-{key.lower()}")
+    async for c in _open(tmp_home):
+        yield c
+
+
+@pytest_asyncio.fixture
+async def ctx_no_keys(tmp_home):
+    async for c in _open(tmp_home):
         yield c
