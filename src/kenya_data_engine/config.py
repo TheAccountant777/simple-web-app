@@ -105,6 +105,7 @@ class ResearchConfig(_Strict):
     tiers: dict[str, int]
     stale_days: dict[str, int]
     max_rounds: int = 3
+    novelty_days: list[int] = [14, 30]  # recency bands that cap novelty at 1 and 3
 
     @model_validator(mode="after")
     def _shares_sum_to_one(self) -> "ResearchConfig":

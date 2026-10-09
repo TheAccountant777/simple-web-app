@@ -120,3 +120,35 @@ async def test_same_title_clusters_get_unique_ids(ctx):
         Cluster(title="Same", summary="s", category="law", signal_ids=["b"]), sigs, ctx, model=fm
     )
     assert t1.id != t2.id
+
+
+async def test_score_blends_novelty(ctx):
+    from datetime import date
+
+    from kenya_data_engine.research.memory import TopicMemory
+
+    mem = TopicMemory(ctx.home.db_path)
+    mem.record("Fuel prices rise", "briefs/x", date(2026, 10, 1))
+    out = {
+        "data_ability": 5, "wallet_impact": 4, "timeliness": 3, "clarity_gap": 2,
+        "novelty": 5, "justification": {"novelty": "fresh"}, "why_now": "w",
+    }  # fmt: skip
+    c = Cluster(title="Fuel prices rise again", summary="s", category="law", signal_ids=["a1"])
+    sigs = {"a1": Signal(id="a1", kind="news", title="t", source="x", url=None, published_at=None)}
+    fm = function_model_returning(out)
+    plain = await score_cluster(c, sigs, ctx, model=fm)
+    blended = await score_cluster(c, sigs, ctx, model=fm, topic_memory=mem, today=date(2026, 10, 9))
+    assert plain.scores.novelty == 5
+    assert blended.scores.novelty == 1  # covered 8 days ago: capped at 1
+    assert blended.scores.justification["novelty"] == "fresh (covered 8 days ago)"
+    assert blended.final_score == weighted_score(blended.scores, ctx.config.weights)
+    assert blended.final_score < plain.final_score
+    # an older coverage band caps at 3; an unrelated title leaves the LLM score alone
+    mem2 = TopicMemory(ctx.home.db_path)
+    older = await score_cluster(c, sigs, ctx, model=fm, topic_memory=mem2, today=date(2026, 10, 25))
+    assert older.scores.novelty == 3
+    other = Cluster(title="Rice imports", summary="s", category="law", signal_ids=["a1"])
+    kept = await score_cluster(
+        other, sigs, ctx, model=fm, topic_memory=mem2, today=date(2026, 10, 9)
+    )
+    assert kept.scores.novelty == 5 and kept.scores.justification["novelty"] == "fresh"

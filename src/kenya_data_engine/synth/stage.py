@@ -5,8 +5,10 @@ import asyncio
 from pydantic_ai.models import Model
 
 from kenya_data_engine.context import RunContext
+from kenya_data_engine.data.periods import today_nairobi
 from kenya_data_engine.errors import BudgetExceeded
 from kenya_data_engine.models import RadarResult, Topic, TopicList
+from kenya_data_engine.research.memory import TopicMemory
 from kenya_data_engine.synth.cluster import Cluster, cluster_signals
 from kenya_data_engine.synth.score import rank_topics, score_cluster
 
@@ -25,6 +27,7 @@ class SynthesizeStage:
     async def run(self, ctx: RunContext, inp: RadarResult) -> TopicList:
         clusters, dropped = await cluster_signals(inp.signals, ctx, model=self.model)
         by_id = {s.id: s for s in inp.signals}
+        memory, today = TopicMemory(ctx.home.db_path), today_nairobi()
         sem = asyncio.Semaphore(max(ctx.config.concurrency, 1))
         exhausted = False
         topics: list[Topic] = []
@@ -38,7 +41,11 @@ class SynthesizeStage:
                     unscored[i] = f"{cluster.title}: not scored (budget)"
                     return
                 try:
-                    topics.append(await score_cluster(cluster, by_id, ctx, model=self.model))
+                    topics.append(
+                        await score_cluster(
+                            cluster, by_id, ctx, model=self.model, topic_memory=memory, today=today
+                        )
+                    )
                 except BudgetExceeded:
                     exhausted = True
                     unscored[i] = f"{cluster.title}: not scored (budget)"

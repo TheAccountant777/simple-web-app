@@ -124,3 +124,27 @@ def test_describe_counts():
 
     out = TopicList(topics=[], dropped=["a", "b"])
     assert SynthesizeStage().describe(out) == "0 topics · 2 dropped"
+
+
+async def test_stage_blends_topic_memory_novelty(ctx):
+    from kenya_data_engine.data.periods import today_nairobi
+    from kenya_data_engine.research.memory import TopicMemory
+
+    TopicMemory(ctx.home.db_path).record("Fuel prices rise", "briefs/x", today_nairobi())
+    titles = ["Fuel prices rise", "Rice imports"]
+
+    def out(prompt):
+        if prompt.startswith("Signals:"):
+            return ClusterOutput(
+                clusters=[
+                    Cluster(title=t, summary="s", category="economy", signal_ids=[f"S{i + 1}"])
+                    for i, t in enumerate(titles)
+                ]
+            )
+        return score_dict(novelty=5)
+
+    res = await SynthesizeStage(model=function_model_returning(out)).run(ctx, radar(2))
+    assert {t.title: t.scores.novelty for t in res.topics} == {
+        "Fuel prices rise": 1,
+        "Rice imports": 5,
+    }

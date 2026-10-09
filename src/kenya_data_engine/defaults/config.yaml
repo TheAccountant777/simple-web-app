@@ -69,6 +69,7 @@ research:
   scout_concurrency: 3
   monthly_search_credits: 1000
   max_rounds: 3
+  novelty_days: [14, 30]  # covered within 14 days caps novelty at 1; within 30 days at 3
   stale_days: {price: 45, rate: 45, statistic: 75, annual: 550, legal_status: 365, event: 365, forecast: 365, other: 365}
   tiers:  # domain suffix -> source tier; unknown domains are tier 4
     epra.go.ke: 1

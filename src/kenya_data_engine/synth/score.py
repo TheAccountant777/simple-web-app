@@ -1,5 +1,7 @@
 """Rubric scoring by the LLM; the final score and ranking are computed in code."""
 
+from datetime import date
+
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent
 from pydantic_ai.models import Model
@@ -7,6 +9,7 @@ from pydantic_ai.models import Model
 from kenya_data_engine.context import RunContext
 from kenya_data_engine.llm import load_prompt, run_agent
 from kenya_data_engine.models import Signal, Topic, TopicScores, signal_id
+from kenya_data_engine.research.memory import TopicMemory, code_novelty
 from kenya_data_engine.synth.cluster import Cluster, format_signals
 
 
@@ -36,6 +39,8 @@ async def score_cluster(
     ctx: RunContext,
     *,
     model: Model | None = None,
+    topic_memory: TopicMemory | None = None,
+    today: date | None = None,
 ) -> Topic:
     lines = format_signals([signals[i] for i in cluster.signal_ids if i in signals])
     prompt = (
@@ -49,13 +54,21 @@ async def score_cluster(
     out = await run_agent(
         agent, prompt, ctx, stage="synthesize_score", name="score", topic_id=tid, model=model
     )
+    novelty, justification = out.novelty, dict(out.justification)
+    if topic_memory is not None and today is not None:
+        days = topic_memory.last_covered(cluster.title, today)
+        capped = code_novelty(days, ctx.config.research.novelty_days)
+        if capped is not None:  # recency is a fact we hold; the LLM cannot score it away
+            novelty = min(novelty, capped)
+            note = f" (covered {days} days ago)"
+            justification["novelty"] = justification.get("novelty", "").rstrip() + note
     scores = TopicScores(
         data_ability=out.data_ability,
         wallet_impact=out.wallet_impact,
         timeliness=out.timeliness,
         clarity_gap=out.clarity_gap,
-        novelty=out.novelty,
-        justification=out.justification,
+        novelty=novelty,
+        justification=justification,
     )
     return Topic(
         id=tid,
