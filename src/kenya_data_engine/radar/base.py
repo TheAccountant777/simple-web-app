@@ -9,6 +9,7 @@ from kenya_data_engine.context import RunContext
 from kenya_data_engine.home import EngineHome
 from kenya_data_engine.models import AdapterError, RadarResult, Signal, normalize_url
 from kenya_data_engine.radar.calendar import CalendarAdapter
+from kenya_data_engine.radar.listing import ListingAdapter
 from kenya_data_engine.radar.rss import RssAdapter
 
 
@@ -73,6 +74,11 @@ def build_adapters(config: EngineConfig, home: EngineHome) -> list[Adapter]:
         adapters.append(RssAdapter("google_trends", config.radar.trends_feed, kind="attention"))
     if "calendar" in enabled:
         adapters.append(CalendarAdapter(home.calendar_path, config.radar.lookahead_days))
+    adapters.extend(
+        ListingAdapter(name, spec, config.radar.max_items)
+        for name, spec in config.radar.listings.items()
+        if name in enabled
+    )
     return adapters
 
 
