@@ -150,3 +150,32 @@ async def test_text_fact_links_page_and_secrets_are_redacted(ctx):
         if p.is_file():
             assert "fake-deepseek" not in p.read_text(), p
     assert not list((root / "data").glob("*"))  # no series data, no CSV
+
+
+def test_dossier_dir_race_takes_the_next_number(tmp_path, monkeypatch):
+    from kenya_data_engine.research import dossier as mod
+
+    day = tmp_path / "2026-10-09"
+    (day / "01-fuel").mkdir(parents=True)
+    real, calls = mod.dossier_dir, []
+
+    def racing(briefs, today, slug):
+        calls.append(1)
+        return day / "01-fuel" if len(calls) == 1 else real(briefs, today, slug)  # lost the race
+
+    monkeypatch.setattr(mod, "dossier_dir", racing)
+    got = mod._claim_dir(tmp_path, TODAY, "fuel")
+    assert got == day / "02-fuel" and got.is_dir() and len(calls) == 2
+
+
+async def test_dossier_json_fields_are_redacted(ctx):
+    outcome = ResearchOutcome(
+        run_id=ctx.run.run_id, brief=_brief(), claims=[], conflicts=[],
+        statuses=[NeedStatus(need_id="n1", status="not_found", notes=["key fake-deepseek leaked"])],
+        verdict="reframed", verdict_reasons=["x fake-deepseek"], scorecard=_score(),
+        gaps=["g fake-deepseek"], challenge_note=None, figures=None, stopped_because="s",
+    )  # fmt: skip
+    root = write_dossier(outcome, ctx, load_book(ctx), today=TODAY)
+    raw = (root / "dossier.json").read_text()
+    doc = json.loads(raw)
+    assert "fake-deepseek" not in raw and "***" in doc["gaps"][0]

@@ -13,7 +13,7 @@ from rich.text import Text
 
 from kenya_data_engine import __version__
 from kenya_data_engine.cli import research as research_cli
-from kenya_data_engine.cli.common import State, get_state, guarded
+from kenya_data_engine.cli.common import State, _scrub, get_state, guarded
 from kenya_data_engine.cli.research import require_search_key
 from kenya_data_engine.cli.run import require_llm_key
 from kenya_data_engine.cli.ui import console, err_console
@@ -156,6 +156,7 @@ def eval_cmd(
             row = asyncio.run(run_scenario(state, scenario, budget))
         except Exception as exc:  # one broken scenario must not hide the others
             msg = getattr(exc, "message", None) or str(exc) or type(exc).__name__
+            msg = _scrub(msg, state.home)
             results.append(Scored(scenario, None, previous, [], error=msg))
             continue
         store.add(row)

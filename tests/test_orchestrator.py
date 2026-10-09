@@ -259,3 +259,59 @@ async def test_source_memory_recorded(ctx, respx_mock, today):
     await research(TOPIC, ctx, models=m)
     entries = SourceMemory(ctx.home.db_path).entries()
     assert len(entries) == 1 and entries[0]["successes"] == 1
+
+
+async def test_resume_continues_a_partial_rounds_checkpoint(ctx, respx_mock):
+    respx_mock.get(WB_URL).respond(json=WB_BODY)
+    m, _ = models(two_needs())
+    await research(TOPIC, ctx, models=m)
+    run = ctx.run.dir / "research"
+    saved = json.loads((run / "rounds.json").read_text())
+    saved.update(rounds=1, stopped_because="")  # as left by a crash after round 1
+    (run / "rounds.json").write_text(json.dumps(saved))
+    for name in ("figures", "claims", "verify", "challenge", "outcome"):
+        (run / f"{name}.json").unlink()
+    scout_model = Counter({"specs": []})
+    m2, planner = models(two_needs(), scout=scout_model)
+    out = await research(TOPIC, ctx, models=m2, resume=True)
+    assert planner.calls == 0  # the plan checkpoint was final
+    assert scout_model.calls == 1 and "Need id: n2" in scout_model.prompts[0]
+    assert out.stopped_because  # round 2 ran and the loop ended properly
+    assert (json.loads((run / "rounds.json").read_text()))["rounds"] == 2
+
+
+async def test_partial_exec_results_survive_a_later_failure(ctx, respx_mock, monkeypatch):
+    from kenya_data_engine.research import orchestrator as orch
+    from kenya_data_engine.research.models import DataSourceSpec
+    from kenya_data_engine.research.needs import ExecResult
+    from kenya_data_engine.research.scout import ScoutResult
+
+    brief = brief_dict(needs=[{"kind": "fact", "question": "What did the MPC decide?"}])
+    m, _ = models(brief)
+    spec = DataSourceSpec(need="n1", via="page_text", url="https://www.centralbank.go.ke/a",
+                          publisher="cbk", why="w")  # fmt: skip
+    ev_ids = []
+
+    async def fake_scout(need, deps, **kw):
+        ev = deps.book.add_text("https://www.centralbank.go.ke/a", "MPC held the rate.", None, None)
+        ev_ids.append(ev.id)
+        return ScoutResult(
+            need_id=need.id, rejected=[], specs=[spec, spec.model_copy(update={"url": "x"})]
+        )
+
+    calls = []
+
+    async def fake_execute(sp, need, deps):
+        calls.append(sp.url)
+        if len(calls) == 2:
+            raise BudgetExceeded("scouts budget exhausted")
+        return ExecResult(spec=sp, evidence_ids=ev_ids[:1])
+
+    monkeypatch.setattr(orch, "scout", fake_scout)
+    monkeypatch.setattr(orch, "execute", fake_execute)
+    out = await research(TOPIC, ctx, models=m)
+    assert len(calls) == 2, (out.gaps, out.stopped_because)
+    (status,) = out.statuses
+    assert status.status == "satisfied" and status.evidence_ids == ev_ids[:1]  # kept
+    assert out.stopped_because == "all needs satisfied"  # the kept evidence closed the need
+    assert any("not scouted" in g for g in out.gaps)

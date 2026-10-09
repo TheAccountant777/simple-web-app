@@ -121,6 +121,7 @@ def test_research_cli_end_to_end(cli, seams, respx_mock, tmp_home):
     assert "Research" in rep.stdout and "Facts/$" in rep.stdout
     rep_json = json.loads(cli.invoke(app, ["report", "--json"]).stdout)
     assert rep_json["research"][0]["verdict"] == "supported"
+    assert rep_json["runs"] == [] and rep_json["aggregate"]["runs"] == 0  # research runs excluded
 
     mem = cli.invoke(app, ["memory", "list"])
     assert (

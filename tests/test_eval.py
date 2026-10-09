@@ -117,9 +117,10 @@ def test_eval_records_and_compares(cli, monkeypatch, tmp_home):  # noqa: F811
 
 def test_eval_scenario_error_is_reported(cli, monkeypatch):  # noqa: F811
     async def boom(topic, rc, **kw):
-        raise RuntimeError("provider down")
+        raise RuntimeError("provider down key=fake-deepseek")
 
     monkeypatch.setattr("kenya_data_engine.cli.eval.research", boom)
     r = cli.invoke(app, ["eval", "--only", "fuel"])
     assert r.exit_code == 1 and "provider down" in r.stdout
+    assert "fake-deepseek" not in r.stdout and "fake-deepseek" not in r.output
     assert CliRunner().invoke(app, ["eval", "--help"]).exit_code == 0

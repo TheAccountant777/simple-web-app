@@ -150,6 +150,10 @@ def research_view(rows: list[DossierInfo]) -> list[Panel | Table | Text]:
     return [table, total]
 
 
+def _is_research(store: RunStore, run_id: str) -> bool:
+    return (store.runs_dir / run_id / "research" / "topic.json").exists()
+
+
 @guarded
 def report(
     ctx: typer.Context,
@@ -171,20 +175,26 @@ def report(
     """
     state = get_state(ctx)
     store = RunStore(state.home.runs_dir)
-    ids = [run_id] if run_id else store.list()[:last]
+    # aggregates describe `engine run` pipelines; research runs are reported in their own section
+    ids = [run_id] if run_id else [i for i in store.list() if not _is_research(store, i)][:last]
+    dossiers = list_dossiers(state.home.briefs_dir)[:last]
     if not ids:
         if json_out:  # keep stdout machine-readable; the hint goes to stderr
-            typer.echo(
-                json.dumps(
-                    {"runs": [], "aggregate": build_report([]).model_dump(mode="json")}, indent=2
-                )
-            )
+            empty: dict[str, object] = {
+                "runs": [],
+                "aggregate": build_report([]).model_dump(mode="json"),
+            }
+            if dossiers:
+                empty["research"] = [d.model_dump(mode="json") for d in dossiers]
+            typer.echo(json.dumps(empty, indent=2))
             Console(stderr=True).print("No runs yet — run `engine run`.")
         else:
             console.print("No runs yet — run `engine run`.")
+            if dossiers:
+                for part in research_view(dossiers):
+                    console.print(part)
         return
     budget = load_config(state.home).budgets.run_usd
-    dossiers = list_dossiers(state.home.briefs_dir)[:last]
     runs = [load_run_metrics(store.open(i), budget) for i in reversed(ids)]  # oldest first
     agg = build_report(runs, only=enabled_source_names(state.home))
     if json_out:

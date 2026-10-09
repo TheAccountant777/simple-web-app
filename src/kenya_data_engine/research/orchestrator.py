@@ -250,8 +250,15 @@ class _Research:
         return tier <= 2
 
     async def _scout_need(
-        self, need: DataNeed, hint: str, deps: ResearchDeps, sem: asyncio.Semaphore, state: _Roots
-    ) -> list[ExecResult]:
+        self,
+        need: DataNeed,
+        hint: str,
+        deps: ResearchDeps,
+        sem: asyncio.Semaphore,
+        state: _Roots,
+        out: list[ExecResult],
+    ) -> None:
+        """Scout one need; results land in `out` as they come, so a later failure keeps them."""
         async with sem:
             if self.ledger.phase() in _LATE:
                 raise BudgetExceeded("research time is nearly used up")
@@ -259,7 +266,6 @@ class _Research:
             state.registry_hits += found.registry_hit
             state.memory_hits += found.memory_hit
             state.notes.setdefault(need.id, []).extend(found.rejected)
-            out: list[ExecResult] = []
             for spec in found.specs:
                 res = await execute(spec, need, deps)
                 out.append(res)
@@ -267,15 +273,20 @@ class _Research:
                     self.memory.record(need, spec, self._ok(res), self.today)
                 except Exception as exc:  # memory is a convenience, never a reason to fail
                     self.log.append(f"memory: could not record: {self.ctx.tracer.redact(str(exc))}")
-            return out
 
     async def rounds(self, brief: ResearchBrief) -> _Roots:
-        saved = self.load("rounds", _Roots)
-        if saved is not None:
+        saved: _Roots | None = None
+        if self.resume and not self.fresh:
+            saved = self.ctx.run.read("research/rounds", _Roots)
+        if saved is not None and saved.stopped_because:
             self.step("rounds", "resumed", f"{saved.rounds} rounds, {saved.stopped_because}")
-            return saved  # type: ignore[no-any-return]
+            return saved
         self.fresh = True
-        state = _Roots(statuses=[], results={n.id: [] for n in brief.data_needs})
+        state = saved or _Roots(statuses=[], results={n.id: [] for n in brief.data_needs})
+        for n in brief.data_needs:
+            state.results.setdefault(n.id, [])
+        if saved is not None:  # a crash left a partial run: carry on after the last full round
+            self.step("rounds", "resumed", f"continuing after round {state.rounds}")
         if not brief.data_needs:
             state.stopped_because = "no data needs"
             self.ledger.close("scouts")
@@ -285,8 +296,8 @@ class _Research:
         sem = asyncio.Semaphore(max(1, self.cfg.scout_concurrency))
         by_need = {n.id: n for n in brief.data_needs}
         out_of_budget = False
-        for round_no in range(1, self.cfg.max_rounds + 1):
-            if round_no == 1:
+        for round_no in range(state.rounds + 1, self.cfg.max_rounds + 1):
+            if not state.statuses:
                 todo = list(brief.data_needs)
             else:
                 open_ids = {s.need_id for s in state.statuses if s.status != "satisfied"}
@@ -297,12 +308,14 @@ class _Research:
             before = self._progress(state)
             self.step("rounds", "start", f"round {round_no}: {', '.join(n.id for n in todo)}")
             hints = {n.id: self._hint(n.id, state) if round_no > 1 else "" for n in todo}
+            partial: dict[str, list[ExecResult]] = {n.id: [] for n in todo}
             outcomes = await asyncio.gather(
-                *(self._scout_need(n, hints[n.id], deps, sem, state) for n in todo),
+                *(self._scout_need(n, hints[n.id], deps, sem, state, partial[n.id]) for n in todo),
                 return_exceptions=True,
             )
             state.rounds = round_no
             for need, res in zip(todo, outcomes, strict=True):
+                state.results[need.id].extend(partial[need.id])  # keep what landed before a failure
                 if isinstance(res, BudgetExceeded):
                     out_of_budget = True
                     msg = f"{need.id}: not scouted, {self.ctx.tracer.redact(res.message)}"
@@ -315,8 +328,6 @@ class _Research:
                     state.notes.setdefault(need.id, []).append(msg)
                 elif isinstance(res, BaseException):
                     raise res
-                else:
-                    state.results[need.id].extend(res)
                 status = need_status(
                     by_need[need.id], state.results[need.id], self.store, self.book, round_no
                 )
@@ -345,6 +356,8 @@ class _Research:
                 state.stopped_because = "scouts budget exhausted"
             if state.stopped_because:
                 break
+        if not state.stopped_because:
+            state.stopped_because = f"max rounds ({self.cfg.max_rounds}) reached"
         for status in state.statuses:
             if status.status != "satisfied":
                 need = by_need[status.need_id]

@@ -95,6 +95,18 @@ def dossier_dir(briefs_dir: Path, today: date, slug: str) -> Path:
     return day / f"{max(taken, default=0) + 1:02d}-{slug}"
 
 
+def _claim_dir(briefs_dir: Path, today: date, slug: str) -> Path:
+    """Create the next free dossier folder; losing a race for NN means taking the next one."""
+    (briefs_dir / today.isoformat()).mkdir(parents=True, exist_ok=True)
+    while True:
+        root = dossier_dir(briefs_dir, today, slug)
+        try:
+            root.mkdir(exist_ok=False)
+        except FileExistsError:
+            continue
+        return root
+
+
 # --- reproducibility --------------------------------------------------------------------------
 
 
@@ -525,8 +537,7 @@ def write_dossier(
 ) -> Path:
     """Write the dossier folder and record the topic in topic memory. Returns the folder."""
     title = outcome.topic.title if outcome.topic else outcome.brief.topic
-    root = dossier_dir(ctx.home.briefs_dir, today, slugify(title))
-    root.mkdir(parents=True, exist_ok=True)
+    root = _claim_dir(ctx.home.briefs_dir, today, slugify(title))
     files: list[str] = []
     store = SeriesStore(ctx.home.db_path)
     catalog = load_catalog(ctx.home)
@@ -619,7 +630,8 @@ def write_dossier(
         charts=charts,
         files=[*files, "dossier.json"],
     )
-    _put(root, "dossier.json", doc.model_dump_json(indent=2), ctx, [])
+    safe = ctx.tracer.redact_data(doc.model_dump(mode="json"))  # redact the fields, not the text
+    _put(root, "dossier.json", json.dumps(safe, indent=2, ensure_ascii=False), ctx, [])
 
     blobs = BlobStore(ctx.home.blobs_dir, ctx.home.db_path)
     for sha in {s.sha256 for s in sources}:
