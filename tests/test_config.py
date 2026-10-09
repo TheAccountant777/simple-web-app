@@ -45,6 +45,8 @@ def test_defaults_load_without_user_file(tmp_home):
     }
     assert cfg.llm.stages["synthesize_cluster"].model == "deepseek-flash"
     assert cfg.llm.stages["synthesize_score"].model == "deepseek-flash"
+    for stage in ("synthesize_cluster", "synthesize_score"):
+        assert cfg.llm.stages[stage].extra_body == {"thinking": {"type": "disabled"}}
     assert cfg.llm.base_url == "https://api.deepseek.com"
     assert cfg.llm.pricing.input_per_m == 0.15 and cfg.llm.pricing.output_per_m == 0.60
     assert cfg.search.providers == ["tavily", "serper"]

@@ -138,6 +138,12 @@ def _raising(exc):
             "retry in a few minutes",
         ),
         (
+            ModelHTTPError(400, "m"),
+            EngineError,
+            "DeepSeek rejected the request",
+            "check llm.stages in config.yaml (e.g. extra_body); re-run with -v for details",
+        ),
+        (
             ModelHTTPError(503, "m"),
             EngineError,
             "DeepSeek is rate-limiting or unavailable",

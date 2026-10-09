@@ -15,15 +15,16 @@ llm:
     input_per_m: 0.15
     output_per_m: 0.60
   stages:
-    # extra_body is empty until Spike 2 (needs an API key) says otherwise.
+    # deepseek-flash thinks by default, and thinking mode rejects the forced
+    # tool_choice used for structured output, so structured stages disable it.
     synthesize_cluster:
       model: deepseek-flash
       max_tokens: 4096
-      extra_body: {}
+      extra_body: {thinking: {type: disabled}}
     synthesize_score:
       model: deepseek-flash
       max_tokens: 4096
-      extra_body: {}
+      extra_body: {thinking: {type: disabled}}
 
 budgets:
   run_usd: 0.50

@@ -61,6 +61,13 @@ def _friendly(exc: BaseException) -> EngineError | None:
             return EngineError(
                 "DeepSeek is rate-limiting or unavailable", hint="retry in a few minutes"
             )
+        if code == 400:
+            return EngineError(
+                "DeepSeek rejected the request",
+                hint=(
+                    "check llm.stages in config.yaml (e.g. extra_body); re-run with -v for details"
+                ),
+            )
         return None
     if isinstance(exc, ModelAPIError):
         return EngineError(
