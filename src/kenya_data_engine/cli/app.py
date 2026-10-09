@@ -6,7 +6,7 @@ from typing import Annotated
 import typer
 
 from kenya_data_engine import __version__
-from kenya_data_engine.cli import doctor, init, report, run, stage, tui
+from kenya_data_engine.cli import compare, doctor, init, report, run, stage, tui
 from kenya_data_engine.cli.common import make_state
 from kenya_data_engine.cli.sources import sources_app
 
@@ -57,6 +57,7 @@ def main(
       engine run --top 3     full pipeline
       engine tui             the engine room: runs, score maths, LLM calls, sources
       engine report          speed, cost and reliability of past runs
+      engine compare         which topics keep coming back across runs
       engine stage radar     just collect signals
     """
     ctx.obj = make_state(home, verbose, quiet)
@@ -65,6 +66,7 @@ def main(
 app.command("run")(run.run)
 app.command("stage")(stage.stage)
 app.command("report")(report.report)
+app.command("compare")(compare.compare)
 app.command("tui")(tui.tui)
 app.command("browse", help="Alias for `engine tui`.")(tui.tui)
 app.command("init")(init.init)

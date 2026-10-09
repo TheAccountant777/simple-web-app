@@ -15,6 +15,7 @@ from textual.widget import Widget
 from textual.widgets import DataTable, OptionList, Static
 from textual.widgets.option_list import Option
 
+from kenya_data_engine.compare import load_topic_runs
 from kenya_data_engine.config import load_config
 from kenya_data_engine.home import EngineHome
 from kenya_data_engine.models import RadarResult, Signal, Topic, TopicList
@@ -117,8 +118,9 @@ def short(text: str, width: int) -> str:
 # ---- pure text builders (tested directly through the screen) ------------------------------
 
 
-def run_label(m: RunMetrics) -> Text:
-    t = Text(f"{m.run_id} ")
+def run_label(m: RunMetrics, marked: bool = False) -> Text:
+    t = Text("✓ " if marked else "  ", style=f"bold {ACCENT}")
+    t.append(f"{m.run_id} ")
     t.append("✓" if m.complete else "⚠", style=GOOD if m.complete else WARN)
     t.append(f" {m.topics:>2} ", style=INK)
     t.append(f"${m.cost_usd:.3f}", style=MUTED)
@@ -224,12 +226,22 @@ def exchange_option(ex: Exchange) -> Option:
     return Option(t, id=ex.file)
 
 
+class RunList(OptionList):
+    """The run list; space marks a run for comparison (enter is left alone)."""
+
+    BINDINGS = [Binding("space", "mark", "Select run")]
+
+    def action_mark(self) -> None:
+        self.screen.query_one(RunsPane).toggle_mark()
+
+
 class RunsPane(Widget):
     """Three panes: runs, topics of the selected run, detail of the selected topic."""
 
     BINDINGS = [
         Binding("o", "open_url", "Open url"),
         Binding("i", "inspect", "Inspect LLM"),
+        Binding("c", "compare", "Compare"),
     ]
 
     def __init__(self, home: EngineHome, scrub: Scrub) -> None:
@@ -243,13 +255,15 @@ class RunsPane(Widget):
         self.budget = 0.0
         self._exchanges: list[Exchange] = []
         self._title_w = 0
+        self.marked: set[str] = set()
+        self._metrics: dict[str, RunMetrics] = {}
 
     # -- layout --
     def compose(self) -> ComposeResult:
         yield Static(EMPTY_RUNS, id="runs-empty")
         with Horizontal(id="runs-body"):
             with Vertical(id="runs-left"):
-                yield OptionList(id="run-list")
+                yield RunList(id="run-list")
                 yield DataTable(id="topic-table", cursor_type="row", zebra_stripes=False)
             with VerticalScroll(id="runs-detail"):
                 yield Static(id="detail")
@@ -277,17 +291,50 @@ class RunsPane(Widget):
         runs = self.query_one("#run-list", OptionList)
         runs.clear_options()
         self.data = None
+        self.marked &= set(self.run_ids)
+        self._metrics = {}
         for rid in self.run_ids:
-            metrics = load_run_metrics(self.store.open(rid), self.budget)
-            runs.add_option(Option(run_label(metrics), id=rid))
+            metrics = self._metrics[rid] = load_run_metrics(self.store.open(rid), self.budget)
+            runs.add_option(Option(run_label(metrics, rid in self.marked), id=rid))
+        self.relabel_runs()
         if not empty:
             runs.highlighted = 0
             self.show_run(self.run_ids[0])
 
-    def select_run(self, run_id: str) -> None:
-        if run_id in self.run_ids:
-            self.query_one("#run-list", OptionList).highlighted = self.run_ids.index(run_id)
-            self.show_run(run_id)
+    def select_run(self, run_id: str, topic_id: str | None = None) -> None:
+        if run_id not in self.run_ids:
+            return
+        self.query_one("#run-list", OptionList).highlighted = self.run_ids.index(run_id)
+        self.show_run(run_id)
+        if topic_id is not None and self.data and self.data.topics:
+            for row, tp in enumerate(self.data.topics.topics):
+                if tp.id == topic_id:
+                    self.query_one(DataTable).move_cursor(row=row)
+                    self.show_topic(row)
+                    break
+
+    # -- compare selection --
+    def toggle_mark(self) -> None:
+        runs = self.query_one("#run-list", OptionList)
+        if runs.highlighted is None or not self.run_ids:
+            return
+        rid = self.run_ids[runs.highlighted]
+        self.marked.symmetric_difference_update({rid})
+        self.relabel_runs()
+
+    def relabel_runs(self) -> None:
+        runs = self.query_one("#run-list", OptionList)
+        for rid, metrics in self._metrics.items():
+            runs.replace_option_prompt(rid, run_label(metrics, rid in self.marked))
+        n = len(self.marked)
+        runs.border_title = f"Runs · {n} selected · c compare" if n else "Runs · ✓/⚠ topics cost"
+
+    def action_compare(self) -> None:
+        from kenya_data_engine.tui.compare import CompareScreen, build_compare  # avoids a cycle
+
+        ids = sorted(self.marked) if self.marked else self.run_ids[:3]
+        runs, skipped = load_topic_runs(self.store, ids)
+        self.app.push_screen(CompareScreen(build_compare(runs, skipped), self.scrub))
 
     def show_run(self, run_id: str) -> None:
         if self.data is not None and self.data.run_id == run_id:

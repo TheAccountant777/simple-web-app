@@ -197,7 +197,7 @@ class InspectorScreen(ModalScreen[None]):
 
 HELP = """\
 [b]Tabs[/]
-  1 Live   2 Runs   3 Sources   4 Performance
+  1 Live   2 Runs   3 Sources
 
 [b]Runs[/]
   tab / shift+tab   move between panes

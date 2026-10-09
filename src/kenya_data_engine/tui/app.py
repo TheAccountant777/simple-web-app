@@ -5,7 +5,7 @@ from typing import Any
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.widgets import Footer, Header, Static, TabbedContent, TabPane
+from textual.widgets import Footer, Header, TabbedContent, TabPane
 
 from kenya_data_engine.home import EngineHome
 from kenya_data_engine.pipeline import Stage
@@ -15,7 +15,7 @@ from kenya_data_engine.tui.runs import RunsPane
 from kenya_data_engine.tui.sources import SourcesPane
 from kenya_data_engine.tui.widgets import HelpScreen, make_scrubber
 
-TABS = ("live", "runs", "sources", "performance")
+TABS = ("live", "runs", "sources")
 
 
 class EngineRoom(App[None]):
@@ -26,7 +26,6 @@ class EngineRoom(App[None]):
         Binding("1", "tab('live')", "Live", show=False),
         Binding("2", "tab('runs')", "Runs", show=False),
         Binding("3", "tab('sources')", "Sources", show=False),
-        Binding("4", "tab('performance')", "Perf", show=False),
         Binding("question_mark", "help", "Help"),
         Binding("q", "quit", "Quit"),
     ]
@@ -51,8 +50,6 @@ class EngineRoom(App[None]):
                 yield RunsPane(self.home, self.scrub)
             with TabPane("3 Sources", id="sources"):
                 yield SourcesPane(self.home, self.scrub)
-            with TabPane("4 Performance", id="performance"):
-                yield Static("Performance view — coming next.", classes="placeholder")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -79,8 +76,8 @@ class EngineRoom(App[None]):
         count = len(RunStore(self.home.runs_dir).list())
         self.sub_title = f"{self.home.root} · {count} run{'' if count == 1 else 's'}"
 
-    def open_run(self, run_id: str) -> None:
-        self.query_one(RunsPane).select_run(run_id)
+    def open_run(self, run_id: str, topic_id: str | None = None) -> None:
+        self.query_one(RunsPane).select_run(run_id, topic_id)
         self.action_tab("runs")
 
     def action_help(self) -> None:

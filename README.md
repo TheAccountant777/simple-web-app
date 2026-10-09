@@ -89,6 +89,36 @@ engine sources test --all [--json]           # every enabled source
 or the exact error with a hint. It exits 0 only if every tested source returned items, and
 `--json` output has a stable shape for scripts.
 
+## Engine Room (TUI) and comparing runs
+
+```bash
+engine tui            # alias: engine browse
+```
+
+| Key | Action |
+|---|---|
+| `1` / `2` / `3` | Live / Runs / Sources tab |
+| `r` / `R` | Live: new run / run ×N (2–5 back to back) · `x` cancels |
+| `space`, then `c` | Runs: select runs, then compare them (with no selection, `c` compares the last 3) |
+| `enter`, `i`, `o` | Open a topic · inspect the LLM exchange · open the source URL |
+| `t` / `T` / `/` | Sources: test the selected source / test all / filter |
+| `?`, `q` | Help · quit |
+
+- **Live** shows the engine running: pipeline stages, source tiles (✓/✗, latency, signals), a streaming
+  event log (HTTP, cache hits, LLM tokens and cost), and a cost-vs-budget gauge.
+- **Runs** shows the ranked topics. For each one you see how the score was built (each criterion ×
+  its weight, adding up to the final score), the signals behind it, and the exact prompts and outputs
+  of every LLM call.
+- **Compare** groups the same story across runs by the signals they share. For each topic it shows
+  how many runs it appeared in (k/N), its mean score and range, its mean rank, and a stability badge
+  (strong, mixed or noise). All of this is computed in code. Run 3–4 times and trust the topics that
+  are strong.
+
+```bash
+engine compare --last 3        # consensus across your last 3 runs (--json for scripts)
+engine report                  # speed, cost, cache and source reliability across runs
+```
+
 ## Where things live
 
 Default home: `~/.kenya-data-engine/` (override with `--home` or `ENGINE_HOME`).

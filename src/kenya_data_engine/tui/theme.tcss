@@ -77,3 +77,19 @@ LivePane.compact #live-mid { height: 6; }
 #live-controls Button:disabled { opacity: 60%; }
 #run-counter { width: auto; padding: 0 1; color: #d9b26f; text-style: bold; }
 #run-count { width: 60; height: auto; background: #181b21; border: round #7aa2c4; padding: 1 2; }
+
+/* Compare screen */
+CompareScreen { background: #15171c; }
+#compare-head { height: 1; padding: 0 1; }
+#compare-empty { margin: 2 4; color: #7d8594; }
+#consensus { height: auto; max-height: 9; }
+CompareScreen.compact #consensus { max-height: 7; }
+#compare-body { height: 1fr; }
+#compare-detail-box, #members {
+    background: #181b21; border: round #2e333d; border-title-color: #8c95a6;
+    scrollbar-size-vertical: 1;
+}
+#compare-detail-box { width: 1fr; padding: 0 1; }
+#members { width: 40; height: 1fr; }
+#members:focus, #consensus:focus { border: round #7aa2c4; }
+#consensus { background: #181b21; border: round #2e333d; }

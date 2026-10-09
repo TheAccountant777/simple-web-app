@@ -115,7 +115,7 @@ async def test_empty_home_message(tmp_home):
     async with EngineRoom(tmp_home).run_test(size=SIZE) as pilot:
         await pilot.pause()
         assert "No runs yet — press 1 then r to start one" in screen_text(pilot.app)
-        await pilot.press("3", "2", "4", "1")
+        await pilot.press("3", "2", "1")
 
 
 async def test_long_prompt_scrolls_without_error(home_with_runs):
@@ -167,9 +167,9 @@ async def test_open_url_and_keys(home_with_runs, monkeypatch):
         await pilot.pause()
         assert "Tabs" in screen_text(pilot.app)
         await pilot.press("escape")
-        await pilot.press("1", "4")
+        await pilot.press("1")
         await pilot.pause()
-        assert "coming next" in screen_text(pilot.app)
+        assert "Performance" not in screen_text(pilot.app)
         await pilot.press("2")
         await pilot.press("q")
 
