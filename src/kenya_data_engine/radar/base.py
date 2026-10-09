@@ -109,13 +109,15 @@ class BrokenAdapter:
         )
 
 
-def build_adapters(config: EngineConfig, home: EngineHome) -> list[Adapter]:
+def build_adapters(
+    config: EngineConfig, home: EngineHome, *, include_disabled: bool = False
+) -> list[Adapter]:
     """One adapter per enabled source in sources.yaml, plus the calendar."""
     sources = load_sources(home)
     adapters: list[Adapter] = [CalendarAdapter(home.calendar_path, config.radar.lookahead_days)]
     adapters.extend(BrokenAdapter(n, why) for n, why in sources.invalid.items())
     for name, spec in sources.specs.items():
-        if not spec.enabled:
+        if not spec.enabled and not include_disabled:
             continue
         if spec.type == "rss":
             adapters.append(RssAdapter(name, spec.url, spec.kind, spec.user_agent))

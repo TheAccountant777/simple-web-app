@@ -1,8 +1,10 @@
 """CLI plumbing: global state, home resolution and the friendly error handler."""
 
 import functools
+import tempfile
 import traceback
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -11,8 +13,10 @@ import typer
 
 from kenya_data_engine.cli.ui import console, err_console, show_error
 from kenya_data_engine.config import load_secrets
+from kenya_data_engine.context import RunContext, open_context
 from kenya_data_engine.errors import EngineError
 from kenya_data_engine.home import EngineHome
+from kenya_data_engine.runs import RunHandle
 
 
 @dataclass
@@ -31,6 +35,15 @@ def get_state(ctx: typer.Context) -> State:
 
 def make_state(home: Path | None, verbose: bool, quiet: bool) -> State:
     return State(home=EngineHome.resolve(home), verbose=verbose, quiet=quiet)
+
+
+@asynccontextmanager
+async def probe_context(state: State) -> AsyncIterator[RunContext]:
+    """A throwaway run context for health probes: nothing is left under runs/."""
+    state.home.ensure()
+    with tempfile.TemporaryDirectory() as tmp:
+        async with open_context(state.home, RunHandle("probe", Path(tmp))) as ctx:
+            yield ctx
 
 
 def _scrub(text: str, home: EngineHome) -> str:
@@ -81,4 +94,4 @@ def guarded[F: Callable[..., Any]](fn: F) -> F:
     return wrapper  # type: ignore[return-value]
 
 
-__all__ = ["State", "console", "get_state", "guarded", "make_state"]
+__all__ = ["State", "console", "get_state", "guarded", "make_state", "probe_context"]

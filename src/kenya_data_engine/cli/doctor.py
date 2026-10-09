@@ -1,11 +1,9 @@
 """`engine doctor`: health checks for keys, the LLM, search and every source."""
 
 import asyncio
-import tempfile
 import time
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from typing import Annotated, Literal
 
 import typer
@@ -13,14 +11,13 @@ from pydantic import BaseModel, TypeAdapter
 from rich.table import Table
 from rich.text import Text
 
-from kenya_data_engine.cli.common import State, get_state, guarded
+from kenya_data_engine.cli.common import State, get_state, guarded, probe_context
 from kenya_data_engine.cli.ui import badge, console, err_console
 from kenya_data_engine.config import legacy_radar_keys
-from kenya_data_engine.context import RunContext, open_context
+from kenya_data_engine.context import RunContext
 from kenya_data_engine.errors import ConfigError
 from kenya_data_engine.health import failing_label
 from kenya_data_engine.radar.base import Adapter, build_adapters, fetch_with_timeout, record_health
-from kenya_data_engine.runs import RunHandle
 from kenya_data_engine.tools.search import build_search
 
 Group = Literal["keys", "llm", "search", "config", "sources"]
@@ -217,11 +214,8 @@ def summary_line(checks: list[Check]) -> Text:
 
 
 async def _collect(state: State) -> list[Check]:
-    state.home.ensure()
-    with tempfile.TemporaryDirectory() as tmp:  # doctor leaves no run behind
-        run = RunHandle("doctor", Path(tmp))
-        async with open_context(state.home, run) as ctx:
-            return await run_checks(ctx)
+    async with probe_context(state) as ctx:  # doctor leaves no run behind
+        return await run_checks(ctx)
 
 
 def run_doctor(

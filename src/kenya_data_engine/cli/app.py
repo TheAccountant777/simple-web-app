@@ -8,6 +8,7 @@ import typer
 from kenya_data_engine import __version__
 from kenya_data_engine.cli import doctor, init, run, stage
 from kenya_data_engine.cli.common import make_state
+from kenya_data_engine.cli.sources import sources_app
 
 app = typer.Typer(
     name="engine",
@@ -52,6 +53,7 @@ def main(
     Examples:
       engine init            set up keys and config
       engine doctor          check keys, LLM, search and sources
+      engine sources list    audit sources; `sources test <name>` checks one live
       engine run --top 3     full pipeline
       engine stage radar     just collect signals
     """
@@ -62,3 +64,4 @@ app.command("run")(run.run)
 app.command("stage")(stage.stage)
 app.command("init")(init.init)
 app.command("doctor")(doctor.doctor)
+app.add_typer(sources_app)

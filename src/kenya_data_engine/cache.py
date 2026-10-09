@@ -52,3 +52,16 @@ class Cache:
                 "INSERT OR REPLACE INTO cache VALUES (?, ?, ?, ?, ?)",
                 (key, content, content_type, now.isoformat(), expires.isoformat()),
             )
+
+
+class NoCache(Cache):
+    """A cache that never hits and never stores: forces live fetches."""
+
+    def __init__(self) -> None:
+        pass
+
+    def get(self, key: str, now: datetime | None = None) -> CacheEntry | None:
+        return None
+
+    def put(self, key: str, content: bytes, content_type: str, ttl_hours: float) -> None:
+        return None
