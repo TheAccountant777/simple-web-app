@@ -267,3 +267,54 @@ async def test_final_url_and_redaction_in_seen(ctx, tmp_path, respx_mock, data_n
     deps2 = _deps(ctx, tmp_path, search)
     await web_search(_pai(deps2), "q")
     assert not any("fake-deepseek" in u for u in deps2.book.seen_urls)
+
+
+async def test_secret_url_shown_redacted_and_redacted_form_accepted(ctx, tmp_path):
+    raw = "https://x.com/?k=fake-deepseek"
+    search = FakeSearch([SearchResult(title="t", url=raw, snippet="s fake-deepseek")])
+    deps = _deps(ctx, tmp_path, search)
+    out = await web_search(_pai(deps), "q")
+    assert "fake-deepseek" not in out
+    shown = out.split(" — ")[1]
+    assert tools.url_allowed(deps, shown) and tools.url_allowed(deps, raw)
+    deps.memory = FakeMemory([("k", _spec("https://m.com/?t=fake-deepseek"))])
+    assert "fake-deepseek" not in memory_lookup(_pai(deps), "q")
+    assert tools.url_allowed(deps, "https://m.com/?t=" + ctx.tracer.redact("fake-deepseek"))
+
+
+def test_memory_lookup_without_url(ctx, tmp_path):
+    deps = _deps(ctx, tmp_path, memory=FakeMemory([("k", _spec(None))]))
+    assert memory_lookup(_pai(deps), "q") == "k — Pub — (no url)"
+
+
+async def test_list_links_survives_malformed_href(ctx, tmp_path, respx_mock, data_net):
+    html = '<a href="http://[::1">bad</a><a href="/ok">ok</a>'
+    respx_mock.get(PAGE_URL).respond(200, content=html.encode())
+    deps = _deps(ctx, tmp_path)
+    deps.book.seen_urls.add(PAGE_URL)
+    out = await list_links(_pai(deps), PAGE_URL)
+    assert out == "[1] ok — https://www.epra.go.ke/ok"
+
+
+async def test_post_fetch_formatting_errors_are_strings(ctx, tmp_path, monkeypatch):
+    deps = _deps(ctx, tmp_path, SimpleNamespace(search=None))
+    out = await web_search(_pai(deps), "q")  # search attribute is not callable
+    assert out.startswith("error: ")
+
+
+async def test_redirect_into_disallowed_path(ctx, tmp_path, respx_mock, data_net):
+    respx_mock.get("https://www.epra.go.ke/robots.txt").respond(
+        200, content=b"User-agent: *\nDisallow: /private\n"
+    )
+    respx_mock.get("https://www.epra.go.ke/ok").respond(
+        302, headers={"location": "https://www.epra.go.ke/private/x"}
+    )
+    respx_mock.get("https://www.epra.go.ke/private/x").respond(200, content=b"<p>secret</p>" * 50)
+    deps = _deps(ctx, tmp_path)
+    deps.book.seen_urls.add("https://www.epra.go.ke/ok")
+    for fn in (read_page, list_links, preview_table):
+        args = ("x",) if fn is read_page else ()
+        assert await fn(_pai(deps), "https://www.epra.go.ke/ok", *args) == (
+            "error: disallowed by robots.txt"
+        )
+    assert deps.book.items == []

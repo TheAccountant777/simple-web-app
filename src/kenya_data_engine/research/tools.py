@@ -19,7 +19,7 @@ from kenya_data_engine.data.registry import CatalogEntry
 from kenya_data_engine.errors import BudgetExceeded
 from kenya_data_engine.models import normalize_url
 from kenya_data_engine.research.budget import Ledger
-from kenya_data_engine.research.evidence import EvidenceBook
+from kenya_data_engine.research.evidence import EvidenceBook, RobotsDisallowed
 from kenya_data_engine.research.models import DataNeed, DataSourceSpec
 from kenya_data_engine.tools.search import FallbackSearch
 
@@ -91,12 +91,18 @@ def _registry_urls(deps: ResearchDeps) -> set[str]:
 
 
 def url_allowed(deps: ResearchDeps, url: str) -> bool:
-    if url in deps.book.seen_urls:
+    """The model only ever sees redacted urls, so compare the redacted form to the allowlist."""
+    redact = deps.ctx.tracer.redact
+    url = redact(url)
+    seen = deps.book.seen_urls
+    if url in seen:
         return True
     norm = normalize_url(url)
-    if any(normalize_url(u) == norm for u in deps.book.seen_urls):
+    if any(normalize_url(u) == norm for u in seen):
         return True
-    return norm in _registry_urls(deps) or url in deps.memory_urls or norm in deps.memory_urls
+    if norm in {normalize_url(redact(u)) for u in _registry_urls(deps)}:
+        return True
+    return any(normalize_url(redact(u)) == norm for u in deps.memory_urls)
 
 
 _ROBOTS = "error: disallowed by robots.txt"
@@ -118,21 +124,26 @@ _UNKNOWN_URL = "error: unknown url — use a url from search results"
 async def web_search(ctx: Ctx, query: str, domains: list[str] | None = None) -> str:
     """Search the web. Returns numbered results: title, url, snippet."""
     deps = ctx.deps
+    red = deps.ctx.tracer.redact
     try:
         results = await deps.search.search(query, n=5, domains=domains or None)
+        _seen(deps, *(r.url for r in results))
+        _note(deps, f"web_search {query!r}: {len(results)} results")
+        if not results:
+            return "no results"
+        return "\n".join(
+            red(f"[{i}] {r.title} — {r.url} — {' '.join(r.snippet.split())[:300]}")
+            for i, r in enumerate(results, start=1)
+        )
     except BudgetExceeded:
         _note(deps, f"web_search {query!r}: budget exhausted")
         return "budget exhausted: stop searching"
     except Exception as exc:
         return _err(deps, "web_search", exc)
-    _seen(deps, *(r.url for r in results))
-    _note(deps, f"web_search {query!r}: {len(results)} results")
-    if not results:
-        return "no results"
-    return "\n".join(
-        f"[{i}] {r.title} — {r.url} — {' '.join(r.snippet.split())[:300]}"
-        for i, r in enumerate(results, start=1)
-    )
+
+
+async def _final_ok(deps: ResearchDeps, final: str) -> bool:
+    return not await robots_blocked(deps, final)
 
 
 async def read_page(ctx: Ctx, url: str, focus: str) -> str:
@@ -145,11 +156,14 @@ async def read_page(ctx: Ctx, url: str, focus: str) -> str:
         if await robots_blocked(deps, url):
             _note(deps, f"read_page {url}: disallowed by robots.txt")
             return _ROBOTS
-        ev = await deps.book.add_url(url, deps.ctx)
+        ev = await deps.book.add_url(url, deps.ctx, final_ok=lambda f: _final_ok(deps, f))
+        _note(deps, f"read_page {url}: {ev.label} tier {ev.tier}")
+        return deps.book.packet([ev.label], focus, READ_CHARS)
+    except RobotsDisallowed:
+        _note(deps, f"read_page {url}: final url disallowed by robots.txt")
+        return _ROBOTS
     except Exception as exc:
         return _err(deps, "read_page", exc)
-    _note(deps, f"read_page {url}: {ev.label} tier {ev.tier}")
-    return deps.book.packet([ev.label], focus, READ_CHARS)
 
 
 async def list_links(ctx: Ctx, url: str, contains: str = "") -> str:
@@ -163,29 +177,38 @@ async def list_links(ctx: Ctx, url: str, contains: str = "") -> str:
             _note(deps, f"list_links {url}: disallowed by robots.txt")
             return _ROBOTS
         res = await policy_fetch(url, deps.ctx, "page")
+        if res.url != url and await robots_blocked(deps, res.url):
+            _note(deps, f"list_links {url}: final url disallowed by robots.txt")
+            return _ROBOTS
         _seen(deps, res.url)
         tree = LexborHTMLParser(res.content.decode("utf-8", errors="replace"))
+        needle = contains.lower()
+        found: list[tuple[str, str]] = []
+        seen: set[str] = set()
+        for a in tree.css("a[href]"):
+            try:
+                href = urljoin(res.url, (a.attributes.get("href") or "").strip())
+            except ValueError:
+                continue  # malformed href, e.g. "http://[::1"
+            text = " ".join((a.text() or "").split())
+            if not href.startswith(("http://", "https://")) or href in seen:
+                continue
+            if needle and needle not in href.lower() and needle not in text.lower():
+                continue
+            seen.add(href)
+            found.append((text[:100], href))
+            if len(found) >= MAX_LINKS:
+                break
+        _seen(deps, *(h for _, h in found))
+        _note(deps, f"list_links {url}: {len(found)} links")
+        if not found:
+            return "no links found"
+        red = deps.ctx.tracer.redact
+        return "\n".join(
+            red(f"[{i}] {t or '(no text)'} — {h}") for i, (t, h) in enumerate(found, start=1)
+        )
     except Exception as exc:
         return _err(deps, "list_links", exc)
-    needle = contains.lower()
-    found: list[tuple[str, str]] = []
-    seen: set[str] = set()
-    for a in tree.css("a[href]"):
-        href = urljoin(res.url, (a.attributes.get("href") or "").strip())
-        text = " ".join((a.text() or "").split())
-        if not href.startswith(("http://", "https://")) or href in seen:
-            continue
-        if needle and needle not in href.lower() and needle not in text.lower():
-            continue
-        seen.add(href)
-        found.append((text[:100], href))
-        if len(found) >= MAX_LINKS:
-            break
-    _seen(deps, *(h for _, h in found))
-    _note(deps, f"list_links {url}: {len(found)} links")
-    if not found:
-        return "no links found"
-    return "\n".join(f"[{i}] {t or '(no text)'} — {h}" for i, (t, h) in enumerate(found, start=1))
 
 
 async def preview_table(ctx: Ctx, url: str, page: int | None = None, table_index: int = 0) -> str:
@@ -199,22 +222,27 @@ async def preview_table(ctx: Ctx, url: str, page: int | None = None, table_index
             _note(deps, f"preview_table {url}: disallowed by robots.txt")
             return _ROBOTS
         res = await policy_fetch(url, deps.ctx, "item")
+        if res.url != url and await robots_blocked(deps, res.url):
+            _note(deps, f"preview_table {url}: final url disallowed by robots.txt")
+            return _ROBOTS
         _seen(deps, res.url)
         tables = await extract_tables(
             res.content, Locator(pages=[page] if page else []), deps.ctx.config.data
         )
+        if not tables:
+            _note(deps, f"preview_table {url}: no tables")
+            return "no tables found"
+        if not 0 <= table_index < len(tables):
+            _note(deps, f"preview_table {url}: table_index {table_index} out of range")
+            return f"error: table_index {table_index} out of range; {len(tables)} tables found"
+        t = tables[table_index]
+        lines = [" | ".join(t.header), *(" | ".join(row) for row in t.rows[:PREVIEW_ROWS])]
+        _note(deps, f"preview_table {url}: table {table_index} of {len(tables)}")
+        return deps.ctx.tracer.redact(
+            f"table {table_index} of {len(tables)} ({len(t.rows)} rows)\n" + "\n".join(lines)
+        )
     except Exception as exc:
         return _err(deps, "preview_table", exc)
-    if not tables:
-        _note(deps, f"preview_table {url}: no tables")
-        return "no tables found"
-    if not 0 <= table_index < len(tables):
-        _note(deps, f"preview_table {url}: table_index {table_index} out of range")
-        return f"error: table_index {table_index} out of range; {len(tables)} tables found"
-    t = tables[table_index]
-    lines = [" | ".join(t.header), *(" | ".join(row) for row in t.rows[:PREVIEW_ROWS])]
-    _note(deps, f"preview_table {url}: table {table_index} of {len(tables)}")
-    return f"table {table_index} of {len(tables)} ({len(t.rows)} rows)\n" + "\n".join(lines)
 
 
 def registry_lookup(ctx: Ctx, query: str) -> str:
@@ -237,14 +265,14 @@ def memory_lookup(ctx: Ctx, query: str) -> str:
     """Remembered sources that worked for similar needs."""
     deps = ctx.deps
     try:
-        pairs = deps.memory.search(query)
+        lines = []
+        for key, spec in deps.memory.search(query):
+            if spec.url:
+                deps.memory_urls.update((spec.url, normalize_url(spec.url)))
+            lines.append(
+                deps.ctx.tracer.redact(f"{key} — {spec.publisher} — {spec.url or '(no url)'}")
+            )
+        _note(deps, f"memory_lookup {query!r}: {len(lines)} hits")
+        return "\n".join(lines) if lines else "no remembered sources"
     except Exception as exc:
         return _err(deps, "memory_lookup", exc)
-    lines = []
-    for key, spec in pairs:
-        if spec.url:
-            deps.memory_urls.add(spec.url)
-            deps.memory_urls.add(normalize_url(spec.url))
-        lines.append(f"{key} — {spec.publisher} — {spec.url}")
-    _note(deps, f"memory_lookup {query!r}: {len(lines)} hits")
-    return "\n".join(lines) if lines else "no remembered sources"

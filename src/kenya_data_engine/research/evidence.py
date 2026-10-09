@@ -4,7 +4,7 @@ import asyncio
 import hashlib
 import io
 import re
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Literal
@@ -15,7 +15,7 @@ from trafilatura import extract_metadata
 from kenya_data_engine.context import RunContext
 from kenya_data_engine.data.adapters.base import policy_fetch
 from kenya_data_engine.data.store import BlobStore
-from kenya_data_engine.errors import ExtractError
+from kenya_data_engine.errors import ExtractError, FetchError
 from kenya_data_engine.research.models import TextEvidence
 from kenya_data_engine.research.tiers import host_of, tier_for
 from kenya_data_engine.tools.fetch import _extract
@@ -66,6 +66,10 @@ def _html_meta(html: str) -> date | None:
         return None
 
 
+class RobotsDisallowed(FetchError):
+    """The final URL after redirects is disallowed by robots.txt."""
+
+
 class EvidenceBook:
     def __init__(
         self, run_dir: Path, tiers: dict[str, int], redact: Callable[[str], str] | None = None
@@ -87,9 +91,12 @@ class EvidenceBook:
         *,
         kind: Literal["page", "item"] = "item",
         pdf_pages: list[int] | None = None,
+        final_ok: Callable[[str], Awaitable[bool]] | None = None,
     ) -> TextEvidence:
         """Fetch through the data fetch policy, store the blob and text, return the evidence."""
         res = await policy_fetch(url, ctx, kind)
+        if final_ok is not None and res.url != url and not await final_ok(res.url):
+            raise RobotsDisallowed("disallowed by robots.txt")  # discard before storing anything
         content = res.content
         blobs = BlobStore(ctx.home.blobs_dir, ctx.home.db_path)
         sha = blobs.put(content)
@@ -226,6 +233,11 @@ class EvidenceBook:
             if prev != len(paras) - 1:
                 out.append(GAP)
             res = "\n".join(out)
+        if len(res) > max_chars and len(keep) == 1:
+            (only,) = keep  # shorten the paragraph itself so the gap markers survive
+            overhead = len(res) - len(paras[only])
+            paras[only] = paras[only][: max(0, max_chars - overhead)]
+            res = "\n".join(([GAP] if only > 0 else []) + [paras[only], GAP])
         return res[:max_chars]
 
     def packet(self, labels: list[str], query: str, per_source_chars: int = 24_000) -> str:

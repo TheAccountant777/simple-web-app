@@ -131,3 +131,11 @@ def test_packet_defangs_spaced_tags(tmp_path):
     assert pkt.count("evidence") == 3 + 2  # open tag + close tag + 3 defanged remain as text
     body = pkt.split("\n", 1)[1].rsplit("\n", 1)[0]
     assert "</" not in body and "< /" not in body and "< evidence" not in body
+
+
+def test_snippets_keeps_trailing_gap_marker(tmp_path):
+    book = EvidenceBook(tmp_path, TIERS)
+    for text, cap in (("z" * 5000, 300), ("\n".join(["a" * 200, "b" * 200, "c" * 200]), 250)):
+        ev = book.add_text("https://x.com/" + str(cap), text, "t", None)
+        out = book.snippets(ev, "q", max_chars=cap)
+        assert len(out) <= cap and out.endswith("[…]")
