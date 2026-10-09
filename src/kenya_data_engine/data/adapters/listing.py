@@ -110,6 +110,7 @@ class ListingAdapter:
         now = datetime.now(UTC)
         out: list[Observation] = []
         for r, row in enumerate(table.rows):
+            row = row + [""] * (len(table.header) - len(row))
             entity = row[entity_col].strip() if entity_col is not None else "Kenya"
             period = (
                 parse_period(row[period_col].strip(), spec.period_type)
@@ -135,7 +136,9 @@ class ListingAdapter:
                             blob_sha256=sha,
                             retrieved_at=now,
                             published=item.published,
-                            locator=table.cell_locators[r][c],
+                            locator=table.cell_locators[r][c]
+                            if c < len(table.cell_locators[r])
+                            else f"r{r}/c{c}",
                             extractor=table.extractor,
                         ),
                     )

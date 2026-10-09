@@ -116,3 +116,38 @@ def test_same_entity_different_metrics_not_duplicate() -> None:
     b = a.model_copy(update={"metric": "diesel", "value": Decimal("170")})
     r = check_observations([a, b], _spec(entities=[]), [])
     assert not any("duplicate" in f for f in r.failures)
+
+
+def test_metrics_allowed_and_unknown_quarantined():
+    from datetime import UTC, datetime
+    from decimal import Decimal
+
+    from kenya_data_engine.data.checks import check_observations
+    from kenya_data_engine.data.models import Observation, Provenance, SeriesSpec
+    from kenya_data_engine.data.periods import year
+
+    prov = Provenance(
+        url="https://e.org",
+        blob_sha256="a",
+        retrieved_at=datetime.now(UTC),
+        locator="l",
+        extractor="e",
+    )
+
+    def ob(metric: str) -> Observation:
+        return Observation(
+            series="s",
+            period=year(2020),
+            entity="N",
+            metric=metric,
+            value=Decimal(1),
+            unit="KES",
+            provenance=prov,
+        )
+
+    spec = SeriesSpec(
+        key="s", metric="super", metrics=["super", "diesel"], unit="KES", period_type="year"
+    )
+    assert check_observations([ob("super"), ob("diesel")], spec, []).status == "accepted"
+    bad = check_observations([ob("gold")], spec, [])
+    assert bad.status == "quarantined" and "gold" in bad.failures[0]

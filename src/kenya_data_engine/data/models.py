@@ -38,6 +38,7 @@ class SeriesSpec(BaseModel):
 
     key: str
     metric: str
+    metrics: list[str] = []  # allowed metrics when a table carries several; empty = {metric}
     unit: str
     period_type: PeriodType
     entities: list[str] = []  # expected entities (e.g. towns); empty = any

@@ -10,6 +10,7 @@ from kenya_data_engine.data.adapters import ADAPTERS
 from kenya_data_engine.data.adapters.base import Discovered
 from kenya_data_engine.data.registry import CatalogEntry, fetch_series
 from kenya_data_engine.data.store import AddResult, BlobStore, SeriesStore
+from kenya_data_engine.errors import ExtractError
 
 pytestmark = pytest.mark.usefixtures("data_net")
 
@@ -100,6 +101,7 @@ def _listing_entry(**over) -> CatalogEntry:
         "spec": {
             "key": "x.cpi",
             "metric": "price",
+            "metrics": ["super", "diesel"],
             "unit": "KES",
             "period_type": "month",
         },
@@ -141,7 +143,7 @@ async def test_listing_series_extract_maps_columns(ctx, respx_mock, tmp_home):
     respx_mock.get("https://example.org/files/CPI%20Bulletin%20January%202026.xlsx").respond(404)
     tmp_home.catalog_path.write_text(
         "x.cpi:\n  adapter: listing\n  title: T\n  publisher: P\n  tier: 1\n"
-        "  spec: {metric: price, unit: KES, period_type: month}\n"
+        "  spec: {metric: price, metrics: [super, diesel], unit: KES, period_type: month}\n"
         "  params:\n    url: https://example.org/data/\n    link_pattern: '/files/.*\\.xlsx$'\n"
         "    date_pattern: '(\\d{4}-\\d{2}|[A-Za-z]+ \\d{4})'\n"
         "    columns: {Town: entity, Super: 'value:super', Diesel: 'value:diesel'}\n"
@@ -186,3 +188,46 @@ async def test_discovery_failure_is_soft(ctx, respx_mock):
     out = await fetch_series("wb:FP.CPI.TOTL.ZG", ctx)
     assert out.fetched == 0 and out.error and "404" in out.error
     assert Discovered(url="u").published is None
+
+
+async def test_sdmx_multi_series_entities_distinct(ctx):
+    doc = {
+        "data": {
+            "dataSets": [
+                {
+                    "series": {
+                        "0": {"observations": {"0": [1]}},
+                        "1": {"observations": {"0": [2]}},
+                    }
+                }
+            ],
+            "structure": {
+                "dimensions": {
+                    "series": [{"values": [{"id": "KEN"}, {"id": "UGA"}]}],
+                    "observation": [{"values": [{"id": "2025-01"}]}],
+                }
+            },
+        }
+    }
+    entry = _sdmx_entry()
+    (item,) = await ADAPTERS["sdmx"].discover(entry, ctx)
+    obs = await ADAPTERS["sdmx"].observations(entry, item, json.dumps(doc).encode(), "s", ctx)
+    assert sorted((o.entity, o.value) for o in obs) == [("KEN", 1), ("UGA", 2)]
+
+
+async def test_worldbank_error_and_pages(ctx):
+    entry = (await _catalog(ctx))["wb:FP.CPI.TOTL.ZG"]
+    wb = ADAPTERS["worldbank"]
+    item = Discovered(url="u")
+    err = json.dumps([{"message": [{"id": "120", "value": "Invalid"}]}]).encode()
+    with pytest.raises(ExtractError, match="World Bank error"):
+        await wb.observations(entry, item, err, "s", ctx)
+    paged = json.dumps([{"pages": 2}, []]).encode()
+    with pytest.raises(ExtractError, match="truncated"):
+        await wb.observations(entry, item, paged, "s", ctx)
+
+
+async def _catalog(ctx):
+    from kenya_data_engine.data.registry import load_catalog
+
+    return load_catalog(ctx.home)

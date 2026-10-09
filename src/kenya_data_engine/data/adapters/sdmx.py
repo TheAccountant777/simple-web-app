@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from kenya_data_engine.context import RunContext
 from kenya_data_engine.data.adapters.base import Discovered
@@ -26,6 +26,7 @@ def _param(entry: CatalogEntry, name: str) -> str:
 
 class SdmxAdapter:
     kind = "sdmx"
+    headers: ClassVar[dict[str, str]] = {"Accept": "application/json"}
 
     async def discover(self, entry: CatalogEntry, ctx: RunContext) -> list[Discovered]:
         base = _param(entry, "base_url").rstrip("/")
@@ -48,10 +49,22 @@ class SdmxAdapter:
             series: dict[str, Any] = datasets[0]["series"]
         except (ValueError, KeyError, IndexError, TypeError, AttributeError) as exc:
             raise ExtractError(f"{entry.key}: unexpected SDMX-JSON response shape") from exc
-        entity = str(entry.params.get("entity", "Kenya"))
+        default_entity = str(entry.params.get("entity", "Kenya"))
+        dims: list[Any] = (structure.get("dimensions") or {}).get("series") or []
+
+        def entity_of(skey: str) -> str:
+            if len(series) == 1:
+                return default_entity
+            try:
+                ids = [dims[i]["values"][int(part)]["id"] for i, part in enumerate(skey.split(":"))]
+            except (IndexError, KeyError, ValueError, TypeError):
+                return skey
+            return ".".join(str(x) for x in ids)
+
         now = datetime.now(UTC)
         out: list[Observation] = []
         for skey, sval in series.items():
+            entity = entity_of(skey)
             for idx, cell in sval.get("observations", {}).items():
                 raw = cell[0] if cell else None
                 if raw is None:

@@ -61,12 +61,18 @@ def fetch_policy(ctx: RunContext, kind: Literal["page", "item"]) -> FetchPolicy:
     )
 
 
-async def policy_fetch(url: str, ctx: RunContext, kind: Literal["page", "item"]) -> FetchResult:
+async def policy_fetch(
+    url: str,
+    ctx: RunContext,
+    kind: Literal["page", "item"],
+    headers: dict[str, str] | None = None,
+) -> FetchResult:
     res = await fetch(
         url,
         client=ctx.http,
         cache=ctx.cache,
         ttl_hours=ctx.config.cache_ttl_hours,
+        headers=headers,
         aia=ctx.tls,
         tracer=ctx.tracer,
         policy=fetch_policy(ctx, kind),

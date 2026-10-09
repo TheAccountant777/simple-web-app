@@ -26,9 +26,12 @@ def check_observations(
     if not obs:
         failures.append("no observations extracted")
 
+    allowed = set(spec.metrics) or {spec.metric}
     seen: dict[tuple[str, str, str], Decimal] = {}
     for o in obs:
         where = f"{o.entity} {o.period.label}"
+        if o.metric not in allowed:
+            failures.append(f"unexpected metric {o.metric!r} for {where}")
         if o.unit != spec.unit:
             failures.append(f"unit mismatch for {where}: {o.unit!r} != {spec.unit!r}")
         if o.period.type != spec.period_type:

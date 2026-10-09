@@ -58,12 +58,12 @@ def list_series(
         table.add_column(col, no_wrap=col != "Title")
     for r in rows:
         table.add_row(
-            str(r["key"]),
-            str(r["title"]),
-            str(r["adapter"]),
-            str(r["tier"]),
-            "yes" if r["enabled"] else "no",
-            str(r["rows"]),
+            Text(str(r["key"])),
+            Text(str(r["title"])),
+            Text(str(r["adapter"])),
+            Text(str(r["tier"])),
+            Text("yes" if r["enabled"] else "no"),
+            Text(str(r["rows"])),
         )
     console.print()
     console.print(table)
@@ -166,13 +166,15 @@ def show(
         writer.writerows(body)
         return
     if not body:
-        console.print(f"[muted]No rows stored for {key}. Run `engine data fetch {key}`.[/]")
+        console.print(
+            Text(f"No rows stored for {key}. Run `engine data fetch {key}`.", style="muted")
+        )
         return
     table = Table(box=None, header_style="bold", pad_edge=False, show_edge=False)
     for col in header:
         table.add_column(col, no_wrap=True, justify="right" if col == "value" else "left")
     for row in body:
-        table.add_row(*row)
+        table.add_row(*(Text(c) for c in row))
     console.print()
     console.print(table)
 

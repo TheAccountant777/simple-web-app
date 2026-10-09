@@ -8,7 +8,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
 from kenya_data_engine.context import RunContext
-from kenya_data_engine.data.adapters.base import Discovered, policy_fetch
+from kenya_data_engine.data.adapters.base import Discovered
 from kenya_data_engine.data.models import Observation, Provenance
 from kenya_data_engine.data.periods import year
 from kenya_data_engine.errors import ExtractError
@@ -33,9 +33,6 @@ class WorldBankAdapter:
         url = f"{API}/v2/country/KEN/indicator/{_indicator(entry)}?format=json&per_page=1000"
         return [Discovered(url=url, title=entry.title)]
 
-    async def fetch(self, url: str, ctx: RunContext) -> bytes:
-        return (await policy_fetch(url, ctx, "item")).content
-
     async def observations(
         self, entry: CatalogEntry, item: Discovered, content: bytes, sha: str, ctx: RunContext
     ) -> list[Observation]:
@@ -45,11 +42,14 @@ class WorldBankAdapter:
         indicator = _indicator(entry)
         try:
             payload: Any = json.loads(content)
+            meta = payload[0]
+            if isinstance(meta, dict) and meta.get("message"):
+                raise ExtractError(f"{entry.key}: World Bank error: {meta['message']}")
+            if int(meta.get("pages", 1)) > 1:
+                raise ExtractError(f"{entry.key}: response has {meta['pages']} pages (truncated)")
             rows = payload[1] or []
-        except (ValueError, IndexError, TypeError, KeyError) as exc:
+        except (ValueError, IndexError, TypeError, KeyError, AttributeError) as exc:
             raise ExtractError(f"{entry.key}: unexpected World Bank response shape") from exc
-        if isinstance(payload[0], dict) and payload[0].get("message"):
-            raise ExtractError(f"{entry.key}: World Bank error: {payload[0]['message']}")
         now = datetime.now(UTC)
         out: list[Observation] = []
         for row in rows:

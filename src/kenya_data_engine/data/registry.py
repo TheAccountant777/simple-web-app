@@ -1,5 +1,6 @@
 """The series registry: catalog.yaml entries and `fetch_series`, the whole fetch pipeline."""
 
+from datetime import date
 from importlib import resources
 from typing import Any, Literal
 
@@ -91,7 +92,9 @@ def _merge_reports(reports: list[tuple[str, CheckReport]]) -> CheckReport | None
 
 
 def _newest_first(items: list[Discovered]) -> list[Discovered]:
-    dated = sorted((i for i in items if i.published), key=lambda i: i.published, reverse=True)  # type: ignore[arg-type,return-value]
+    dated = sorted(
+        (i for i in items if i.published), key=lambda i: i.published or date.min, reverse=True
+    )
     return dated + [i for i in items if not i.published]
 
 
@@ -133,7 +136,7 @@ async def fetch_series(key: str, ctx: RunContext, *, limit: int = 12) -> FetchOu
     totals = AddResult(0, 0, 0)
     for item in reversed(found[:limit]):
         try:
-            res = await policy_fetch(item.url, ctx, "item")
+            res = await policy_fetch(item.url, ctx, "item", getattr(adapter, "headers", None))
             sha = blobs.put(res.content)
             fetched += 1
             obs: list[Observation] = await adapter.observations(entry, item, res.content, sha, ctx)

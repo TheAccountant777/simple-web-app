@@ -56,8 +56,12 @@ class ProbeResult(BaseModel):
     hint: str | None = None
 
 
+def _safe(text: str) -> str:
+    return re.sub(r"[^\w.\-]+", "_", text).strip("._")
+
+
 def _filename(url: str, index: int, kind: str) -> str:
-    name = re.sub(r"[^\w.\-]+", "_", unquote(urlsplit(url).path.rsplit("/", 1)[-1])).strip("._")
+    name = _safe(unquote(urlsplit(url).path.rsplit("/", 1)[-1]))
     name = name or f"item-{index}"
     ext = _EXT.get(kind, "")
     return name if ext and name.lower().endswith(ext) else name + ext
@@ -78,16 +82,20 @@ async def probe_entry(entry: CatalogEntry, ctx: RunContext, save_dir: Path | Non
         for n, item in enumerate(items[:MAX_SAMPLES_PER_KEY]):
             if n and save_dir is None:
                 break
-            page = await policy_fetch(item.url, ctx, "item")
-            kind = sniff(page.content)
-            if n == 0:
-                res.sniffed = kind
-                res.final_url = res.final_url or page.url
-            if save_dir is not None and len(page.content) <= MAX_SAMPLE_BYTES:
-                target = save_dir / entry.key.replace("/", "_") / _filename(item.url, n, kind)
-                target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_bytes(page.content)
-                res.saved.append(str(target))
+            try:
+                page = await policy_fetch(item.url, ctx, "item")
+                kind = sniff(page.content)
+                if n == 0:
+                    res.sniffed = kind
+                    res.final_url = res.final_url or page.url
+                if save_dir is not None and len(page.content) <= MAX_SAMPLE_BYTES:
+                    target = save_dir / _safe(entry.key) / _filename(item.url, n, kind)
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_bytes(page.content)
+                    res.saved.append(str(target))
+            except Exception:
+                if n == 0:
+                    raise  # the first item decides the entry's status; a later one is optional
         res.status = "ok"
     except Exception as exc:
         res.error = ctx.tracer.redact(str(exc) or type(exc).__name__)

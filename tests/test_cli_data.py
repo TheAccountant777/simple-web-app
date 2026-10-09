@@ -88,7 +88,7 @@ def test_catalog_probe_reports_and_saves_samples(cli, respx_mock, tmp_home, tmp_
     (res,) = json.loads(r.output)
     assert res["status"] == "ok" and res["sniffed"] == "json" and res["links_found"] == 1
     assert res["final_url"].startswith(WB)
-    saved = list((out / "wb:FP.CPI.TOTL.ZG").iterdir())
+    saved = list((out / "wb_FP.CPI.TOTL.ZG").iterdir())
     assert len(saved) == 1 and json.loads(saved[0].read_bytes())[1] == ROWS
     assert json.loads((out / "probe.json").read_text())[0]["key"] == "wb:FP.CPI.TOTL.ZG"
     assert SeriesStore(tmp_home.db_path).series_keys() == []
@@ -154,3 +154,27 @@ def test_gc_prunes_unreferenced(cli, tmp_home):
     assert not blobs.path(old).exists() and blobs.path(kept).exists() and blobs.path(fresh).exists()
     assert "Nothing to prune" in run(cli, "gc", "--yes").output
     assert run(cli, "gc", "--older-than", "soon").exit_code == 2
+
+
+def test_show_survives_markup_in_scraped_strings(cli, tmp_home):
+    SeriesStore(tmp_home.db_path).add(
+        [
+            Observation(
+                series="wb:FP.CPI.TOTL.ZG",
+                period=year(2020),
+                entity="[/x]",
+                metric="inflation",
+                value=1,
+                unit="%",
+                provenance=Provenance(
+                    url="https://e.org/x",
+                    blob_sha256="a",
+                    retrieved_at=datetime.now(UTC),
+                    locator="l",
+                    extractor="e",
+                ),
+            )
+        ]
+    )
+    r = run(cli, "data", "show", "wb:FP.CPI.TOTL.ZG")
+    assert r.exit_code == 0 and "[/x]" in r.output
