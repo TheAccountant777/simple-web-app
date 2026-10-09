@@ -1,6 +1,7 @@
 """AIA chasing for servers that omit their intermediate certificate. No real network."""
 
 import hashlib
+import ssl
 from datetime import UTC, datetime, timedelta
 
 import httpx
@@ -71,6 +72,11 @@ def chain():
     mid = make_cert("Mid", "Root", mid_key, root_key, ca=True)
     leaf = make_cert("site.ke", "Mid", leaf_key, mid_key, ca=False, aia=AIA_URL)
     return root, mid, leaf
+
+
+@pytest.fixture(autouse=True)
+def trust_test_root(chain, monkeypatch):
+    monkeypatch.setattr(tls, "_trusted_roots", lambda: (chain[0],))
 
 
 def der(cert) -> bytes:
@@ -242,3 +248,55 @@ async def test_adapters_pass_the_context_fixer(respx_mock, ctx):
         == []
     )
     assert used == ["https://site.ke/feed"]
+
+
+def test_validate_accepts_intermediate_issued_by_trusted_root(chain):
+    tls.validate_intermediate(chain[1])
+
+
+def test_validate_rejects_self_signed_ca():
+    k = ec.generate_private_key(ec.SECP256R1())
+    rogue = make_cert("Rogue Root", "Rogue Root", k, k, ca=True)
+    with pytest.raises(ValueError, match="self-signed"):
+        tls.validate_intermediate(rogue)
+
+
+def test_validate_rejects_non_ca(chain):
+    with pytest.raises(ValueError, match="not a CA"):
+        tls.validate_intermediate(chain[2])
+
+
+def test_validate_rejects_ca_from_untrusted_issuer():
+    rk, mk = (ec.generate_private_key(ec.SECP256R1()) for _ in range(2))
+    evil = make_cert("Evil Mid", "Evil Root", mk, rk, ca=True)
+    with pytest.raises(ValueError, match="trusted root"):
+        tls.validate_intermediate(evil)
+
+
+def test_validate_rejects_forged_issuer_name(chain):
+    """Claims the trusted root's name but is signed by another key."""
+    fk, mk = (ec.generate_private_key(ec.SECP256R1()) for _ in range(2))
+    forged = make_cert("Mid2", "Root", mk, fk, ca=True)
+    with pytest.raises(ValueError, match="trusted root"):
+        tls.validate_intermediate(forged)
+
+
+async def test_fixer_refuses_to_cache_rogue_ca(tmp_path, chain, monkeypatch):
+    k = ec.generate_private_key(ec.SECP256R1())
+    rogue = make_cert("Rogue Root", "Rogue Root", k, k, ca=True)
+    monkeypatch.setattr(tls, "_fetch_leaf_der", lambda h, p: der(chain[2]))
+
+    async def fake_download(url):
+        return der(rogue)
+
+    monkeypatch.setattr(tls, "_download", fake_download)
+    fixer = AiaFixer(tmp_path / "certs")
+    with pytest.raises(Exception):  # noqa: B017 - any refusal is fine; nothing may be cached
+        await fixer.client_for("https://site.ke/")
+    assert not list((tmp_path / "certs").glob("*.pem"))
+    await fixer.aclose()
+
+
+def test_context_disables_partial_chains(tmp_path):
+    ctx = AiaFixer(tmp_path / "certs").ssl_context()
+    assert not ctx.verify_flags & ssl.VERIFY_X509_PARTIAL_CHAIN

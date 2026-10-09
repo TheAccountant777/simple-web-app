@@ -9,15 +9,18 @@ to a trusted root.
 """
 
 import asyncio
+import functools
 import hashlib
 import socket
 import ssl
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlsplit
 
 import certifi
 import httpx
 from cryptography import x509
+from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import serialization
 from cryptography.x509.oid import AuthorityInformationAccessOID
 
@@ -32,6 +35,40 @@ def is_incomplete_chain(exc: Exception) -> bool:
         and "CERTIFICATE_VERIFY_FAILED" in text
         and "unable to get local issuer" in text
     )
+
+
+@functools.cache
+def _trusted_roots() -> tuple[x509.Certificate, ...]:
+    return tuple(x509.load_pem_x509_certificates(Path(certifi.where()).read_bytes()))
+
+
+def validate_intermediate(cert: x509.Certificate) -> None:
+    """Refuse anything but a current CA certificate directly issued by a trusted root.
+
+    The issuer URL comes from a certificate read over an unverified connection, so whatever
+    it downloads is untrusted input. Without this check an attacker could hand us their own
+    CA and, once cached in the trust store, it would vouch for any site.
+    """
+    try:
+        bc = cert.extensions.get_extension_for_class(x509.BasicConstraints).value
+    except x509.ExtensionNotFound:
+        bc = None
+    if bc is None or not bc.ca:
+        raise ValueError("downloaded certificate is not a CA certificate")
+    if cert.issuer == cert.subject:
+        raise ValueError("downloaded certificate is self-signed; refusing to trust it")
+    now = datetime.now(UTC)
+    if not (cert.not_valid_before_utc <= now <= cert.not_valid_after_utc):
+        raise ValueError("downloaded certificate is not currently valid")
+    for root in _trusted_roots():
+        if root.subject != cert.issuer:
+            continue
+        try:
+            cert.verify_directly_issued_by(root)
+        except (ValueError, TypeError, InvalidSignature):
+            continue
+        return
+    raise ValueError("downloaded certificate is not issued by a trusted root")
 
 
 def aia_issuer_urls(cert: x509.Certificate) -> list[str]:
@@ -96,12 +133,16 @@ class AiaFixer:
 
     def ssl_context(self) -> ssl.SSLContext:
         context = ssl.create_default_context(cafile=certifi.where())
+        # Cached intermediates must never act as trust anchors: every chain has to reach a
+        # self-signed root from certifi. (Python 3.13+ enables partial chains by default.)
+        context.verify_flags &= ~ssl.VERIFY_X509_PARTIAL_CHAIN
         for pem in sorted(self.certs_dir.glob("*.pem")):
             context.load_verify_locations(cafile=str(pem))
         return context
 
     def _store(self, data: bytes) -> None:
         cert = _parse_cert(data)
+        validate_intermediate(cert)
         der = cert.public_bytes(serialization.Encoding.DER)
         self.certs_dir.mkdir(parents=True, exist_ok=True)
         path = self.certs_dir / f"{hashlib.sha256(der).hexdigest()}.pem"
