@@ -40,8 +40,8 @@ def _figures(tmp_path):
 
 def test_render_placeholders(tmp_path):
     fbook, pack = _figures(tmp_path)
-    assert render("Price {F1}, up {F2} or {F3}.", pack, fbook) == (
-        "Price 198.00 KES/L, up 18.00 KES/L or 10.0%."
+    assert render("Price {F1}, {F2} or {F3}.", pack, fbook) == (
+        "Price 198.00 KES/L, up 18.00 KES/L or up 10.0%."
     )
     assert (
         render("Spaced { f1 } twice {F1}", pack, fbook) == "Spaced 198.00 KES/L twice 198.00 KES/L"

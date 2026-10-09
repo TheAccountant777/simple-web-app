@@ -5,6 +5,7 @@ import pytest
 from conftest import function_model_returning
 from research_util import make_deps
 
+from kenya_data_engine.data.periods import parse_period
 from kenya_data_engine.data.stats import Figure, FigureBook
 from kenya_data_engine.research.claims import ClaimsOutput
 from kenya_data_engine.research.figures import FigurePack
@@ -26,6 +27,7 @@ from kenya_data_engine.research.verify import (
     recheck_verdict,
     verify_static,
 )
+from kenya_data_engine.research.verify_static import _near_quote
 
 TODAY = date(2026, 10, 9)
 PAGE = (
@@ -529,16 +531,16 @@ def test_figure_only_claims_are_checked(ctx, tmp_path):
         c = _cand(quote=None, evidence=None, text_template=template, figures=figs, **kw)
         return _static(ctx, deps, [c], pack=pack, fbook=fb)[0]
 
-    ok = one("Super in Nairobi rose by {F2}.", ["F2"])
-    assert ok.reasons == [] and ok.text == "Super in Nairobi rose by 18.00 KES/L."
-    down = one("Super in Nairobi fell by {F3}.", ["F3"])
-    assert down.reasons == [] and down.text == "Super in Nairobi fell by 2.10 KES/L."  # absolute
-    plain = one("Super in Nairobi changed by {F3}.", ["F3"])
-    assert plain.text == "Super in Nairobi changed by -2.10 KES/L."
-    wrong = one("Super in Nairobi fell by {F2}.", ["F2"])
+    ok = one("Super in Nairobi is rising, {F2}.", ["F2"])
+    assert ok.reasons == [] and ok.text == "Super in Nairobi is rising, up 18.00 KES/L."
+    neutral = one("Super in Nairobi went {F2}.", ["F2"])
+    assert neutral.reasons == [] and neutral.text == "Super in Nairobi went up 18.00 KES/L."
+    down = one("Super in Nairobi went {F3}.", ["F3"])
+    assert down.reasons == [] and down.text == "Super in Nairobi went down 2.10 KES/L."
+    wrong = one("Super in Nairobi is falling by {F2}.", ["F2"])
     assert wrong.status == "refused" and any("direction" in r for r in wrong.reasons)
-    wrong = one("Super in Nairobi rose by {F3}.", ["F3"])
-    assert wrong.status == "refused"
+    wrong = one("Super in Nairobi jumped {F3}.", ["F3"])
+    assert wrong.status == "refused" and any("direction" in r for r in wrong.reasons)
     mombasa = one("Super in Mombasa costs {F1}.", ["F1"], entity="Mombasa")
     assert mombasa.status == "refused" and not mombasa.entity_period_ok
     assert any("does not name" in r for r in mombasa.reasons)
@@ -630,3 +632,40 @@ def test_year_separators_digits_and_number_words(ctx, tmp_path):
         ctx, deps, [_cand(text_template="Nairobi: one fuel price, KSh 198.00 per litre.")]
     )
     assert both[0].status == "refused"
+
+
+# --- fix round 2 ---------------------------------------------------------------------------
+
+
+def test_rate_and_statistic_on_one_metric_conflict():
+    base = dict(entity="fuel", metric="vat rate on fuel", period="2026-09")
+    rate = _c("C1", "The VAT rate on fuel is 16 per cent.", published=date(2026, 9, 15), **base)
+    stat = _c("C2", "VAT on fuel is 8 per cent.", 3, claim_type="statistic",
+              published=date(2026, 9, 29), **base)  # fmt: skip
+    conflicts = detect_conflicts([rate, stat])
+    assert [(k.claim_ids, k.kept) for k in conflicts] == [(["C1", "C2"], "C1")]
+    out = {c.id: c.status for c in assign_status([rate, stat], conflicts)}
+    assert out["C1"] == "fact" and out["C2"] != "fact"
+
+
+def test_direction_stems_and_sensitive_stems(ctx, tmp_path):
+    deps = _book(ctx, tmp_path)
+    texts = [
+        "Nairobi: KSh 198.00 per litre, fraudulent.",
+        "Arrests over KSh 198.00 per litre in Nairobi.",
+        "Nairobi officials embezzled KSh 198.00 per litre.",
+        "Scandals on KSh 198.00 per litre in Nairobi.",
+    ]
+    got = _static(ctx, deps, [_cand(text_template=t) for t in texts])
+    assert all(c.sensitive for c in got)
+    epra = _cand(text_template="VAT on fuel is charged at 16 per cent.", quote=LEGAL_Q,
+                 entity="fuel")  # fmt: skip
+    assert not _static(ctx, deps, [epra])[0].sensitive
+
+
+def test_may_is_a_month_only_beside_a_number():
+    p = parse_period("2026-05")
+    assert not _near_quote(p, "prices may change in 2026")
+    assert _near_quote(p, "effective 4 may 2026")
+    assert _near_quote(p, "as at may 2026")
+    assert not _near_quote(p, "it may rise during 2026")

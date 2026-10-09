@@ -145,6 +145,13 @@ def _close(a: Decimal, b: Decimal) -> bool:
 
 
 _Key = tuple[str, str, str, str, str, str]
+_LEGAL = "legal_status"
+
+
+def _family(c: Claim) -> str:
+    """Rate, price, statistic, annual and other numeric claims are one family; legal_status
+    stands apart (a bill's proposal never conflicts with a rate in force)."""
+    return _LEGAL if c.claim_type == _LEGAL else "numeric"
 
 
 def _key(c: Claim) -> _Key | None:
@@ -158,8 +165,8 @@ def _key(c: Claim) -> _Key | None:
         _norm(c.entity),
         _norm(c.period),
         n.unit,
-        c.claim_type,
-        c.legal_stage or "",
+        _family(c),
+        (c.legal_stage or "") if _family(c) == _LEGAL else "",
     )
 
 
@@ -234,7 +241,7 @@ def _norm(s: str | None) -> str:
 
 
 def _same_subject(a: Claim, b: Claim) -> bool:
-    if a.claim_type != b.claim_type:
+    if _family(a) != _family(b):
         return False
     if a.metric is None or a.entity is None or b.metric is None or b.entity is None:
         return False

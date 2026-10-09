@@ -12,9 +12,8 @@ from kenya_data_engine.data.periods import Period, parse_period
 from kenya_data_engine.data.stats import FigureBook
 from kenya_data_engine.research.claims import (
     CHANGE_KINDS,
-    DOWN_WORDS,
     PLACEHOLDER,
-    UP_WORDS,
+    directions,
     render,
 )
 from kenya_data_engine.research.evidence import EvidenceBook
@@ -26,7 +25,13 @@ from kenya_data_engine.tools.numbers import ParsedNumber, find_numbers, same_num
 
 _PERIOD_REQUIRED = {"price", "rate", "statistic", "annual", "forecast"}
 _SENSITIVE = re.compile(
-    r"\b(charged with|arrested|fraud|corruption|theft|scandal|embezzle\w*)\b", re.IGNORECASE
+    r"\b(?:charged with|fraud\w*|corrupt\w*|arrest\w*|scandal\w*|embezzl\w*|theft|"
+    r"thie(?:f|ves|ving))\b",
+    re.IGNORECASE,
+)
+_MAY = re.compile(
+    r"\bmay\s+\d{1,2}\b|\b\d{1,2}(?:st|nd|rd|th)?\s+may\b|\bmay,?\s+(?:19|20)\d{2}\b|"
+    r"\b(?:19|20)\d{2}\s+may\b"
 )
 _NUMBER_WORDS = re.compile(
     r"\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|"
@@ -116,8 +121,9 @@ def _near_quote(p: Period, window: str) -> bool:
         return True
     m, y = p.start.month, p.start.year
     name = _MONTHS[m - 1]
+    named = _MAY.search(window) if m == 5 else re.search(rf"\b{name}\b|\b{name[:3]}\b", window)
     return (
-        re.search(rf"\b{name}\b|\b{name[:3]}\b", window) is not None
+        named is not None
         or re.search(rf"(?<!\d){y}[-/]0?{m}(?!\d)|(?<!\d)0?{m}[-/]{y}(?!\d)", window) is not None
     )
 
@@ -157,13 +163,13 @@ def figure_checks(
     for r in refs:
         if not _contains(low, r.entity.lower()):
             problems.append(f"figure {r.label} is for {r.entity!r}, which the claim does not name")
-    up, down = UP_WORDS.search(shown), DOWN_WORDS.search(shown)
+    found = directions(shown)
     values = {f.id: f.value for f in fbook.figures}
     for r in refs:
         v = values.get(r.figure_id)
-        if r.kind not in CHANGE_KINDS or v is None or not (up or down):
+        if r.kind not in CHANGE_KINDS or v is None or not found:
             continue
-        if (up and v <= 0) or (down and v >= 0):
+        if ("up" in found and v <= 0) or ("down" in found and v >= 0):
             problems.append(f"direction word contradicts the sign of figure {r.label}")
     return problems
 

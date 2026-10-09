@@ -33,17 +33,27 @@ def claims_instructions(today: date) -> str:
     return load_prompt("claims").replace("{{today}}", today.isoformat())
 
 
-UP_WORDS = re.compile(
-    r"\b(rose|risen|rise|rises|increased?|increases|up|higher|climbed|gained)\b", re.I
+_UP = (
+    r"ris(?:e|es|en|ing)|rose|grow\w*|grew|surg\w*|jump\w*|climb\w*|gain\w*|increas\w*|"
+    r"higher|soar\w*|spik\w*"
 )
-DOWN_WORDS = re.compile(
-    r"\b(fell|fallen|fall|falls|decreased?|decreases|down|lower|dropped|declined?)\b", re.I
+_DOWN = (
+    r"fall\w*|fell|declin\w*|drop\w*|slid\w*|plung\w*|cut(?:s|ting)?|reduc\w*|cheap\w*|"
+    r"decreas\w*|lower|dip(?:s|ped|ping)?|slump\w*|eas(?:e|es|ed|ing)"
 )
+UP_WORDS = re.compile(rf"\b(?:{_UP})", re.I)
+DOWN_WORDS = re.compile(rf"\b(?:{_DOWN})", re.I)
 CHANGE_KINDS = ("change", "pct_change", "yoy")
 
 
-def has_direction(text: str) -> bool:
-    return UP_WORDS.search(text) is not None or DOWN_WORDS.search(text) is not None
+def directions(text: str) -> set[str]:
+    """Direction stems found in `text`: a subset of {"up", "down"}."""
+    found = set()
+    if UP_WORDS.search(text):
+        found.add("up")
+    if DOWN_WORDS.search(text):
+        found.add("down")
+    return found
 
 
 def _format(fig: Figure, *, absolute: bool = False) -> str:
@@ -55,14 +65,22 @@ def _format(fig: Figure, *, absolute: bool = False) -> str:
     return f"{q:,} {fig.unit}"
 
 
+def _signed(fig: Figure) -> str:
+    """A change-type figure with its direction from code: "up 3.50 KES", "down 2.10 KES"."""
+    if fig.value > 0:
+        return f"up {_format(fig, absolute=True)}"
+    if fig.value < 0:
+        return f"down {_format(fig, absolute=True)}"
+    return f"unchanged ({_format(fig)})"
+
+
 def render(template: str, figures: FigurePack, book: FigureBook) -> str | None:
     """`{F2}` becomes the figure's value and unit. An unknown or unlisted label gives None.
 
-    With a direction word in the template ("fell", "rose"), a change-type figure shows its
-    absolute value: the word carries the sign.
+    A change-type figure renders as a signed phrase ("up 3.50 KES", "down 2.10 KES"), so the
+    direction always comes from code.
     """
     allowed = {r.label: r for r in figures.refs}
-    directional = has_direction(PLACEHOLDER.sub(" ", template))
     by_id = {f.id: f for f in book.figures}
     bad = False
 
@@ -73,7 +91,7 @@ def render(template: str, figures: FigurePack, book: FigureBook) -> str | None:
         if label not in allowed or fig is None:
             bad = True
             return ""
-        return _format(fig, absolute=directional and allowed[label].kind in CHANGE_KINDS)
+        return _signed(fig) if allowed[label].kind in CHANGE_KINDS else _format(fig)
 
     out = PLACEHOLDER.sub(sub, template)
     if bad or _STRAY.search(out):

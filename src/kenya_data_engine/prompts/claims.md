@@ -18,7 +18,10 @@ discarded, so write only what the material directly supports.
 1. One fact per claim. Make it readable on its own, without the surrounding text.
 2. Never write a number you computed yourself. A number comes from exactly one of two places:
    - a figure: put the placeholder `{F2}` in `text_template` where the number belongs, and list
-     `"F2"` in `figures`. Code replaces it with the exact value and unit. A claim that uses
+     `"F2"` in `figures`. Change figures (change, pct_change, yoy) render with their direction
+     automatically, so write "Super in Nairobi went {F2}" and it reads "went up 18.00 KES". Do
+     not write rose, fell or any direction word yourself: a word that contradicts the sign is
+     refused. Code replaces it with the exact value and unit. A claim that uses
      figures has no `quote` and no `evidence`;
    - a source passage: a number written literally in `text_template` must appear, with the same
      value and unit, in the `quote`. Do not round, convert or recompute it. A literal year is
