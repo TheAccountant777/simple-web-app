@@ -117,6 +117,18 @@ async def test_doctor_source_timeout_uses_source_timeout(respx_mock, ctx):
     assert c.status == "fail" and "timed out after 0.05s" in c.detail
 
 
+async def test_doctor_warns_when_config_still_has_legacy_radar_sources(respx_mock, ctx):
+    mock_healthy(respx_mock, ctx)
+    clean = by_name(await run_checks(ctx))
+    assert "config.yaml" not in clean
+    ctx.home.config_path.write_text("radar:\n  feeds: {a: https://a.ke}\n  enabled: [rss]\n")
+    c = by_name(await run_checks(ctx))["config.yaml"]
+    assert c.status == "warn" and c.group == "config"
+    assert "radar.enabled" in c.detail and "radar.feeds" in c.detail
+    assert "sources.yaml" in c.detail and "engine init --reset-config" in c.detail
+    assert await run_checks(ctx)  # still produces the normal checks
+
+
 async def test_doctor_empty_source_warns(respx_mock, ctx):
     mock_healthy(respx_mock, ctx)
     respx_mock.get(load_sources(ctx.home).specs["nation"].url).respond(200, content=b"not a feed")

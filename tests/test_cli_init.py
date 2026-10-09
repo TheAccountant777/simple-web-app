@@ -1,10 +1,12 @@
 import httpx
 import pytest
+import yaml
 from typer.testing import CliRunner
 
 from kenya_data_engine.cli import init as init_mod
 from kenya_data_engine.cli.app import app
 from kenya_data_engine.cli.init import write_env
+from kenya_data_engine.config import load_config, load_sources
 
 MODELS = "https://api.deepseek.com/models"
 
@@ -40,7 +42,7 @@ def test_init_does_not_overwrite_config_without_force(cli, monkeypatch, tmp_home
     assert tmp_home.config_path.read_text() == "top_n: 9\n"
     assert "kept existing" in r.stdout
     r = init(cli, "--non-interactive", "--no-verify", "--force")
-    assert "top_n: 5" in tmp_home.config_path.read_text() and "overwritten" in r.stdout
+    assert "top_n: 9" not in tmp_home.config_path.read_text() and "overwritten" in r.stdout
 
 
 def test_init_preserves_unrelated_env_lines(cli, monkeypatch, tmp_home):
@@ -172,3 +174,51 @@ def test_init_ignores_source_failures_for_exit_code(cli, monkeypatch, respx_mock
 
     monkeypatch.setattr(doctor_mod, "run_checks", fake_fail)
     assert init(cli, "--non-interactive").exit_code == 1
+
+
+def test_init_writes_short_override_only_config(cli, monkeypatch, tmp_home):
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-deep")
+    assert init(cli, "--non-interactive", "--no-verify").exit_code == 0
+    text = tmp_home.config_path.read_text()
+    assert yaml.safe_load(text) is None  # nothing active: every line is a comment
+    assert "only put overrides here" in text.lower() and "defaults ship with the engine" in text
+    for example in ("# top_n:", "#   run_usd:", "source_timeout_s"):
+        assert example in text
+    assert "weights" not in text and "llm:" not in text  # not a copy of the defaults
+    assert load_config(tmp_home).top_n == 5  # and it loads
+
+
+def test_init_writes_commented_sources_template_and_never_clobbers_it(cli, monkeypatch, tmp_home):
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-deep")
+    init(cli, "--non-interactive", "--no-verify")
+    text = tmp_home.sources_path.read_text()
+    assert yaml.safe_load(text) is None and "my_outlet" in text and "enabled: false" in text
+    assert load_sources(tmp_home).invalid == {}
+    tmp_home.sources_path.write_text("nation:\n  enabled: false\n")
+    init(cli, "--non-interactive", "--no-verify", "--force")
+    assert tmp_home.sources_path.read_text() == "nation:\n  enabled: false\n"
+
+
+def test_init_still_copies_full_calendar(cli, monkeypatch, tmp_home):
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-deep")
+    init(cli, "--non-interactive", "--no-verify")
+    assert "events:" in tmp_home.calendar_path.read_text()
+
+
+def test_reset_config_backs_up_then_writes_short_version(cli, monkeypatch, tmp_home):
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-deep")
+    tmp_home.config_path.write_text("top_n: 9\nradar:\n  enabled: [rss]\n")
+    tmp_home.calendar_path.write_text("events: []\n")
+    r = init(cli, "--non-interactive", "--no-verify", "--reset-config")
+    assert r.exit_code == 0, r.output
+    backups = list(tmp_home.root.glob("config.yaml.bak-*"))
+    assert len(backups) == 1 and backups[0].read_text() == "top_n: 9\nradar:\n  enabled: [rss]\n"
+    assert yaml.safe_load(tmp_home.config_path.read_text()) is None
+    assert tmp_home.calendar_path.read_text() == "events: []\n"  # user data untouched
+    assert "config.yaml.bak-" in r.stdout
+
+
+def test_reset_config_without_existing_file_makes_no_backup(cli, monkeypatch, tmp_home):
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-deep")
+    r = init(cli, "--non-interactive", "--no-verify", "--reset-config")
+    assert r.exit_code == 0 and list(tmp_home.root.glob("config.yaml.bak-*")) == []

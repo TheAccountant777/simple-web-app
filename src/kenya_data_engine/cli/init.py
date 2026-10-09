@@ -2,6 +2,7 @@
 
 import os
 import re
+from datetime import datetime
 from importlib import resources
 from pathlib import Path
 from typing import Annotated
@@ -56,6 +57,48 @@ def verify_deepseek(base_url: str, key: str) -> tuple[bool, str]:
     return True, "DeepSeek key accepted"
 
 
+CONFIG_TEMPLATE = """\
+# Kenya Data Engine: your overrides.
+#
+# Only put overrides here. The defaults ship with the engine, so new defaults reach you
+# on update. (Lists and maps you write here replace the default, so keep this file short.)
+# Radar sources are not configured here: see sources.yaml.
+#
+# Examples (remove the leading "# " to use one):
+#
+# top_n: 8                 # topics kept in the ranking (default 5)
+#
+# budgets:
+#   run_usd: 1.00          # hard budget per run (default 0.50)
+#
+# radar:
+#   source_timeout_s: 30   # per-source timeout (default 20)
+#   since_hours: 48        # look-back window (default 72)
+"""
+
+SOURCES_TEMPLATE = """\
+# Kenya Data Engine: your source overrides, merged by name over the packaged sources.
+#
+# Each entry is merged field by field, so you only write what you change. The full list
+# and the schema (type, url, kind, enabled, user_agent, item/title/link/date, notes) are in
+# the packaged defaults/sources.yaml. Check a source with: engine sources test <name>
+#
+# Examples (remove the leading "# " to use one):
+#
+# nation:
+#   enabled: false           # switch a source off
+#
+# cbk_news:
+#   title: "h2 a, h3 a"      # fix one selector; everything else stays as shipped
+#
+# my_outlet:                 # add a new source
+#   type: rss
+#   url: https://example.co.ke/rss
+#   kind: news
+#   notes: "added 2026-10-09"
+"""
+
+
 def _copy_default(name: str, dest: Path, force: bool) -> str:
     existed = dest.exists()
     if existed and not force:
@@ -63,6 +106,25 @@ def _copy_default(name: str, dest: Path, force: bool) -> str:
     text = resources.files("kenya_data_engine").joinpath(f"defaults/{name}").read_text("utf-8")
     dest.write_text(text, encoding="utf-8")
     return "overwritten" if existed else "created"
+
+
+def _write_template(dest: Path, text: str, force: bool) -> str:
+    existed = dest.exists()
+    if existed and not force:
+        return "kept existing"
+    dest.write_text(text, encoding="utf-8")
+    return "overwritten" if existed else "created"
+
+
+def _reset_config(dest: Path) -> str:
+    """Back up an existing config.yaml, then write the short override-only version."""
+    note = "reset"
+    if dest.exists():
+        backup = dest.with_name(f"{dest.name}.bak-{datetime.now():%Y%m%d-%H%M%S}")
+        dest.replace(backup)
+        note = f"reset (old copy saved as {backup.name})"
+    dest.write_text(CONFIG_TEMPLATE, encoding="utf-8")
+    return note
 
 
 def _format_value(value: str) -> str:
@@ -158,6 +220,13 @@ def init(
     force: Annotated[
         bool, typer.Option("--force", help="Overwrite config.yaml and calendar.yaml.")
     ] = False,
+    reset_config: Annotated[
+        bool,
+        typer.Option(
+            "--reset-config",
+            help="Back up config.yaml and replace it with the short override-only version.",
+        ),
+    ] = False,
     no_verify: Annotated[
         bool, typer.Option("--no-verify", help="Skip checking the key and running doctor.")
     ] = False,
@@ -173,16 +242,20 @@ def init(
     Examples:
       engine init
       engine init --force
+      engine init --reset-config
       DEEPSEEK_API_KEY=sk-... TAVILY_API_KEY=tvly-... engine init --non-interactive
     """
     state = get_state(ctx)
     state.home.ensure()
     console.print(f"[accent]Engine home:[/] {state.home.root}")
-    for name, dest in (
-        ("config.yaml", state.home.config_path),
-        ("calendar.yaml", state.home.calendar_path),
-    ):
-        result = _copy_default(name, dest, force)
+    results = {
+        "config.yaml": _reset_config(state.home.config_path)
+        if reset_config
+        else _write_template(state.home.config_path, CONFIG_TEMPLATE, force),
+        "sources.yaml": _write_template(state.home.sources_path, SOURCES_TEMPLATE, False),
+        "calendar.yaml": _copy_default("calendar.yaml", state.home.calendar_path, force),
+    }
+    for name, result in results.items():
         mark = "[muted]•[/]" if result == "kept existing" else "[ok]✓[/]"
         console.print(f"{mark} {name}: {result}")
 

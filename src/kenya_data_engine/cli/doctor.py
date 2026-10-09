@@ -15,6 +15,7 @@ from rich.text import Text
 
 from kenya_data_engine.cli.common import State, get_state, guarded
 from kenya_data_engine.cli.ui import badge, console, err_console
+from kenya_data_engine.config import legacy_radar_keys
 from kenya_data_engine.context import RunContext, open_context
 from kenya_data_engine.errors import ConfigError
 from kenya_data_engine.health import failing_label
@@ -22,13 +23,14 @@ from kenya_data_engine.radar.base import Adapter, build_adapters, fetch_with_tim
 from kenya_data_engine.runs import RunHandle
 from kenya_data_engine.tools.search import build_search
 
-Group = Literal["keys", "llm", "search", "sources"]
+Group = Literal["keys", "llm", "search", "config", "sources"]
 Status = Literal["ok", "warn", "fail", "skip"]
 
 GROUP_TITLES: dict[str, str] = {
     "keys": "API keys",
     "llm": "LLM",
     "search": "Search",
+    "config": "Config",
     "sources": "Radar sources",
 }
 CHECK_TIMEOUT_S = 30.0
@@ -74,6 +76,22 @@ def _key_checks(ctx: RunContext) -> list[Check]:
     else:
         out.append(Check(name="Search key", group="keys", status="ok", detail="Tavily + Serper"))
     return out
+
+
+def _config_checks(ctx: RunContext) -> list[Check]:
+    legacy = legacy_radar_keys(ctx.home)
+    if not legacy:
+        return []
+    keys = ", ".join(f"radar.{k}" for k in legacy)
+    return [
+        Check(
+            name="config.yaml",
+            group="config",
+            status="warn",
+            detail=f"{keys} no longer apply: sources live in sources.yaml. Move entries "
+            "there, or run `engine init --reset-config` to start from a clean config.yaml",
+        )
+    ]
 
 
 async def _timed(
@@ -161,7 +179,7 @@ async def run_checks(ctx: RunContext) -> list[Check]:
     ]
     for adapter in build_adapters(ctx.config, ctx.home):
         coros.append(_timed(ctx, adapter.name, "sources", _source_probe(ctx, adapter)))
-    return [*_key_checks(ctx), *await asyncio.gather(*coros)]
+    return [*_key_checks(ctx), *_config_checks(ctx), *await asyncio.gather(*coros)]
 
 
 def checks_table(checks: list[Check]) -> Table:
