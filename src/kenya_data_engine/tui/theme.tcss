@@ -4,7 +4,7 @@ Header { background: #1b1e25; color: #c9ced8; }
 Footer { background: #1b1e25; }
 TabbedContent { height: 1fr; }
 TabPane { padding: 0; }
-RunsPane, SourcesPane { height: 1fr; width: 1fr; }
+RunsPane, SourcesPane, LivePane { height: 1fr; width: 1fr; }
 #runs-body { height: 1fr; }
 #sources-body { height: 1fr; }
 Tabs { background: #15171c; }
@@ -50,3 +50,25 @@ InspectorScreen, HelpScreen { align: center middle; background: #0c0d10; }
 #inspector-keys { height: 1; padding: 0 1; color: #7d8594; background: #1b1e25; }
 #help { width: 72; height: auto; background: #181b21; border: round #7aa2c4; padding: 1 2; }
 #help-keys { margin-top: 1; }
+
+/* Live tab */
+LivePane { layout: vertical; padding: 0 1; }
+#pipeline { height: 4; margin-top: 1; }
+LivePane.compact #pipeline { height: 2; margin-top: 0; }
+#live-mid { height: 8; }
+LivePane.compact #live-mid { height: 6; }
+#sources-box, #gauges, #events, #live-result {
+    background: #181b21; border: round #2e333d; border-title-color: #8c95a6;
+    scrollbar-size-vertical: 1;
+}
+#sources-box { width: 1fr; padding: 0 1; }
+#gauges { width: 34; padding: 0 1; }
+#g-cost, #g-rest { height: auto; }
+#cost-bar { height: 1; width: 1fr; }
+#cost-bar Bar { width: 1fr; }
+#cost-bar Bar > .bar--bar { color: #7aa2c4; background: #2e333d; }
+#cost-bar Bar > .bar--complete { color: #8fbf9f; }
+#cost-bar.hot Bar > .bar--bar { color: #d9b26f; }
+#live-result { height: auto; max-height: 5; padding: 0 1; }
+#events { height: 1fr; padding: 0 1; }
+#events:focus { border: round #7aa2c4; }

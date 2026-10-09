@@ -10,6 +10,7 @@ from textual.widgets import Footer, Header, Static, TabbedContent, TabPane
 from kenya_data_engine.home import EngineHome
 from kenya_data_engine.pipeline import Stage
 from kenya_data_engine.runs import RunStore
+from kenya_data_engine.tui.live import LivePane
 from kenya_data_engine.tui.runs import RunsPane
 from kenya_data_engine.tui.sources import SourcesPane
 from kenya_data_engine.tui.widgets import HelpScreen, make_scrubber
@@ -45,8 +46,7 @@ class EngineRoom(App[None]):
         yield Header()
         with TabbedContent(initial="runs"):
             with TabPane("1 Live", id="live"):
-                # Filled in by the live-view task; the shell only reserves the tab.
-                yield Static("Live run view — coming next.", classes="placeholder")
+                yield LivePane(self.home, self.scrub, self.live_stages_factory)
             with TabPane("2 Runs", id="runs"):
                 yield RunsPane(self.home, self.scrub)
             with TabPane("3 Sources", id="sources"):
@@ -72,6 +72,16 @@ class EngineRoom(App[None]):
             if child.can_focus and child.display:
                 child.focus()
                 return
+
+    def refresh_after_run(self) -> None:
+        """A live run finished (or stopped): bring the Runs tab and the run count up to date."""
+        self.query_one(RunsPane).refresh_runs()
+        count = len(RunStore(self.home.runs_dir).list())
+        self.sub_title = f"{self.home.root} · {count} run{'' if count == 1 else 's'}"
+
+    def open_run(self, run_id: str) -> None:
+        self.query_one(RunsPane).select_run(run_id)
+        self.action_tab("runs")
 
     def action_help(self) -> None:
         self.push_screen(HelpScreen())

@@ -284,6 +284,11 @@ class RunsPane(Widget):
             runs.highlighted = 0
             self.show_run(self.run_ids[0])
 
+    def select_run(self, run_id: str) -> None:
+        if run_id in self.run_ids:
+            self.query_one("#run-list", OptionList).highlighted = self.run_ids.index(run_id)
+            self.show_run(run_id)
+
     def show_run(self, run_id: str) -> None:
         if self.data is not None and self.data.run_id == run_id:
             return
