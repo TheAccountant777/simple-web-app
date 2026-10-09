@@ -19,11 +19,15 @@ def _count_latest_period(rows: list[Observation] | list[StoredObservation]) -> i
 
 
 def check_observations(
-    obs: list[Observation], spec: SeriesSpec, previous: list[StoredObservation]
+    obs: list[Observation],
+    spec: SeriesSpec,
+    previous: list[StoredObservation],
+    rejects: list[str] | None = None,
 ) -> CheckReport:
-    failures: list[str] = []
+    """`rejects` are cells the adapter could not read as a value; each one is a failure."""
+    failures: list[str] = list(rejects or [])
     warnings: list[str] = []
-    if not obs:
+    if not obs and not rejects:
         failures.append("no observations extracted")
 
     allowed = set(spec.metrics) or {spec.metric}

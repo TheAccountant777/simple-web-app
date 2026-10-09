@@ -25,7 +25,10 @@ class RawTable(BaseModel):
     source_kind: Literal["csv", "xlsx", "html", "pdf"]
 
 
-_FOOTNOTE = re.compile(r"(?:(?:source|note)s?(?:[:.)\s]|$)|\*|\d{1,2}\))", re.IGNORECASE)
+_FOOTNOTE = re.compile(
+    r"(?:(?:source|note)s?(?:[:.)\s]|$)|\*(?:[\s\d]|$)|\d{1,2}\))", re.IGNORECASE
+)
+SPAN = "span:"  # cell_locators prefix: the value was copied from a spanning/merged origin
 _WS = re.compile(r"\s+")
 
 
@@ -93,10 +96,14 @@ def build_table(
         else _detect_header_rows(grid)
     )
     n_head = min(n_head, len(grid))
+    body_locs = loc_grid[n_head:]
+    for row_locs in body_locs:  # a spanned label (e.g. a town covering rows) is still a label
+        if row_locs and row_locs[0].startswith(SPAN):
+            row_locs[0] = row_locs[0][len(SPAN) :]
     return RawTable(
         header=_flatten(grid[:n_head], len(keep)) if n_head else [""] * len(keep),
         rows=grid[n_head:],
-        cell_locators=loc_grid[n_head:],
+        cell_locators=body_locs,
         extractor=extractor,
         source_kind=kind,
     )

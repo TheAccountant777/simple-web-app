@@ -44,9 +44,12 @@ def read_xlsx(content: bytes, locator: Locator, max_bytes: int) -> list[RawTable
             if rng.min_row > len(cells) or rng.min_col > len(cells[rng.min_row - 1]):
                 continue
             top = cells[rng.min_row - 1][rng.min_col - 1]
+            origin = locs[rng.min_row - 1][rng.min_col - 1]
             for r in range(rng.min_row, min(rng.max_row, len(cells)) + 1):
                 for c in range(rng.min_col, min(rng.max_col, len(cells[r - 1])) + 1):
-                    cells[r - 1][c - 1] = top
+                    if (r, c) != (rng.min_row, rng.min_col):
+                        cells[r - 1][c - 1] = top
+                        locs[r - 1][c - 1] = f"span:{origin}"
     except ExtractError:
         raise
     except Exception as exc:

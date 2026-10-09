@@ -157,9 +157,14 @@ async def test_pdf_garbage_raises() -> None:
 
 
 async def test_xlsx_zip_bomb_guard() -> None:
-    cfg = CFG.model_copy(update={"max_bytes": {"html": 1, "pdf": 1, "sheet": 10}})
+    def build(ws: Any) -> None:
+        for _ in range(300):
+            ws.append(["a" * 1000])
+
+    data = _xlsx(build)
+    cfg = CFG.model_copy(update={"max_bytes": {"html": 1, "pdf": 1, "sheet": len(data) + 1}})
     with pytest.raises(ExtractError, match="expands"):
-        await extract_tables(_xlsx(_merged), Locator(), cfg)
+        await extract_tables(data, Locator(), cfg)
 
 
 async def test_unknown_type_raises() -> None:
@@ -232,3 +237,50 @@ async def test_corrupt_xlsx_raises_extract_error() -> None:
         zf.writestr("xl/workbook.xml", "<not xml")
     with pytest.raises(ExtractError):
         await extract_tables(buf.getvalue(), Locator(), CFG)
+
+
+async def test_html_spanned_copy_is_marked_except_label_column() -> None:
+    html = (
+        b"<table><tr><th>Town</th><th>Super</th><th>Diesel</th></tr>"
+        b"<tr><td>Nairobi</td><td colspan=2>180.50</td></tr>"
+        b"<tr><td rowspan=2>Coast</td><td>1</td><td>2</td></tr>"
+        b"<tr><td>3</td><td>4</td></tr></table>"
+    )
+    (t,) = await extract_tables(html, Locator(), CFG)
+    assert t.rows[0] == ["Nairobi", "180.50", "180.50"]
+    assert t.cell_locators[0] == ["t0/r1/c0", "t0/r1/c1", "span:t0/r1/c1"]
+    assert t.cell_locators[2][0] == "t0/r2/c0"  # label column: the copy is a label, not a number
+
+
+async def test_xlsx_merged_copy_is_marked() -> None:
+    def build(ws: Any) -> None:
+        ws.append(["Town", "Super", "Diesel"])
+        ws.append(["Nairobi", 180.5, None])
+        ws.merge_cells("B2:C2")
+
+    (t,) = await extract_tables(_xlsx(build), Locator(), CFG)
+    assert t.rows[0] == ["Nairobi", "180.5", "180.5"]
+    assert t.cell_locators[0][1:] == ["Sheet1!B2", "span:Sheet1!B2"]
+
+
+async def test_star_followed_by_letter_is_not_a_footnote() -> None:
+    def build(ws: Any) -> None:
+        ws.append(["Town", "Price"])
+        ws.append(["*Nairobi", 1])
+        ws.append(["*2 provisional", None])
+        ws.append(["* provisional", None])
+
+    (t,) = await extract_tables(_xlsx(build), Locator(), CFG)
+    assert t.rows == [["*Nairobi", "1"]]
+
+
+async def test_sheet_size_cap_enforced_for_xlsx_and_csv() -> None:
+    small = DataConfig(max_bytes={"html": 1000, "pdf": 1000, "sheet": 50})
+    with pytest.raises(ExtractError, match="too large"):
+        await extract_tables(b"a,b\n" + b"1,2\n" * 50, Locator(), small)
+
+    def build(ws: Any) -> None:
+        ws.append(["a"] * 40)
+
+    with pytest.raises(ExtractError, match="too large"):
+        await extract_tables(_xlsx(build), Locator(), small)

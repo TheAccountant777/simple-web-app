@@ -98,6 +98,17 @@ def _newest_first(items: list[Discovered]) -> list[Discovered]:
     return dated + [i for i in items if not i.published]
 
 
+async def _extract(
+    adapter: Any, entry: CatalogEntry, item: Discovered, content: bytes, sha: str, ctx: RunContext
+) -> tuple[list[Observation], list[str]]:
+    """Observations and rejects; adapters without an `extract` method have no rejects."""
+    extract = getattr(adapter, "extract", None)
+    if extract is not None:
+        result: tuple[list[Observation], list[str]] = await extract(entry, item, content, sha, ctx)
+        return result
+    return await adapter.observations(entry, item, content, sha, ctx), []
+
+
 async def fetch_series(key: str, ctx: RunContext, *, limit: int = 12) -> FetchOutcome:
     """discover → policy fetch → blob → observations → checks → store.
 
@@ -139,10 +150,10 @@ async def fetch_series(key: str, ctx: RunContext, *, limit: int = 12) -> FetchOu
             res = await policy_fetch(item.url, ctx, "item", getattr(adapter, "headers", None))
             sha = blobs.put(res.content)
             fetched += 1
-            obs: list[Observation] = await adapter.observations(entry, item, res.content, sha, ctx)
-            if not obs:
+            obs, rejects = await _extract(adapter, entry, item, res.content, sha, ctx)
+            if not obs and not rejects:
                 raise EngineError("no observations extracted")
-            report = check_observations(obs, entry.spec, store.latest(key))
+            report = check_observations(obs, entry.spec, store.latest(key), rejects)
             reports.append((item.url, report))
             if report.status == "accepted":
                 added = store.add(obs)

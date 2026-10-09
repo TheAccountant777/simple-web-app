@@ -12,10 +12,11 @@ from selectolax.lexbor import LexborHTMLParser
 from kenya_data_engine.context import RunContext
 from kenya_data_engine.data.adapters.base import Discovered, policy_fetch
 from kenya_data_engine.data.extract import Locator, extract_tables
+from kenya_data_engine.data.extract.grid import SPAN
 from kenya_data_engine.data.models import Observation, Provenance
 from kenya_data_engine.data.periods import Period, PeriodType, parse_period
 from kenya_data_engine.errors import ExtractError
-from kenya_data_engine.tools.numbers import parse_number
+from kenya_data_engine.tools.numbers import is_missing, parse_number
 
 if TYPE_CHECKING:
     from kenya_data_engine.data.registry import CatalogEntry
@@ -31,6 +32,21 @@ def _pattern(entry: CatalogEntry, name: str, *, required: bool = False) -> re.Pa
         return re.compile(str(raw))
     except re.error as exc:
         raise ExtractError(f"{entry.key}: params.{name} is not a valid regex: {exc}") from exc
+
+
+def _shown(text: str) -> str:
+    text = " ".join(text.split())
+    return repr(text if len(text) <= 40 else text[:37] + "...")
+
+
+def _cell_unit(spec_unit: str, parsed_unit: str) -> str:
+    """The unit a cell states for itself (R12: KES, USD, pct) or the series unit if it states none.
+
+    A compound series unit ("KES/L") already contains the stated currency, so it is kept.
+    """
+    if parsed_unit == "none" or spec_unit == parsed_unit or spec_unit.startswith(parsed_unit + "/"):
+        return spec_unit
+    return parsed_unit
 
 
 def match_period(
@@ -82,9 +98,15 @@ class ListingAdapter:
     async def observations(
         self, entry: CatalogEntry, item: Discovered, content: bytes, sha: str, ctx: RunContext
     ) -> list[Observation]:
+        return (await self.extract(entry, item, content, sha, ctx))[0]
+
+    async def extract(
+        self, entry: CatalogEntry, item: Discovered, content: bytes, sha: str, ctx: RunContext
+    ) -> tuple[list[Observation], list[str]]:
+        """Observations plus rejects: cells that look like data but cannot be trusted as such."""
         spec = entry.spec
         if spec is None:
-            return []
+            return [], []
         locator = Locator.model_validate(entry.params.get("locator", {}))
         columns: dict[str, str] = {
             str(k).strip().lower(): str(v) for k, v in entry.params.get("columns", {}).items()
@@ -109,19 +131,38 @@ class ListingAdapter:
         item_period = match_period(entry, [item.title, item.url], spec.period_type)
         now = datetime.now(UTC)
         out: list[Observation] = []
+        rejects: list[str] = []
+
+        def where(r: int, c: int) -> str:
+            locs = table.cell_locators[r]
+            return locs[c] if c < len(locs) else f"r{r}/c{c}"
+
         for r, row in enumerate(table.rows):
             row = row + [""] * (len(table.header) - len(row))
             entity = row[entity_col].strip() if entity_col is not None else "Kenya"
-            period = (
-                parse_period(row[period_col].strip(), spec.period_type)
-                if period_col is not None
-                else item_period
-            )
+            if period_col is not None:
+                period_text = row[period_col].strip()
+                period = parse_period(period_text, spec.period_type)
+                if period is None and period_text:
+                    shown = _shown(period_text)
+                    rejects.append(f"{where(r, period_col)}: unparsable period {shown}")
+            else:
+                period = item_period
             if not entity or period is None:
                 continue
             for c, metric in value_cols:
-                parsed = parse_number(row[c])
+                text = row[c].strip()
+                loc = where(r, c)
+                if text and loc.startswith(SPAN):
+                    rejects.append(
+                        f"{loc[len(SPAN) :]}: spanned value {_shown(text)} copied into "
+                        f"{entity} {metric}"
+                    )
+                    continue
+                parsed = parse_number(text)
                 if parsed is None:
+                    if text and not is_missing(text):
+                        rejects.append(f"{loc}: unparsable value {_shown(text)}")
                     continue
                 out.append(
                     Observation(
@@ -130,17 +171,15 @@ class ListingAdapter:
                         entity=entity,
                         metric=metric,
                         value=parsed.value,
-                        unit=spec.unit,
+                        unit=_cell_unit(spec.unit, parsed.unit),
                         provenance=Provenance(
                             url=item.url,
                             blob_sha256=sha,
                             retrieved_at=now,
                             published=item.published,
-                            locator=table.cell_locators[r][c]
-                            if c < len(table.cell_locators[r])
-                            else f"r{r}/c{c}",
+                            locator=loc,
                             extractor=table.extractor,
                         ),
                     )
                 )
-        return out
+        return out, rejects

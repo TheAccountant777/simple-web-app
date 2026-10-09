@@ -231,3 +231,63 @@ async def _catalog(ctx):
     from kenya_data_engine.data.registry import load_catalog
 
     return load_catalog(ctx.home)
+
+
+async def _listing_run(ctx, respx_mock, tmp_home, body: str, unit: str = "KES"):
+    respx_mock.get("https://example.org/data/").respond(
+        200, text='<a href="/files/CPI-2026-02.html">Feb 2026</a>'
+    )
+    respx_mock.get("https://example.org/files/CPI-2026-02.html").respond(200, text=body)
+    tmp_home.catalog_path.write_text(
+        "x.cpi:\n  adapter: listing\n  title: T\n  publisher: P\n  tier: 1\n"
+        f"  spec: {{metric: price, metrics: [super, diesel], unit: {unit}, period_type: month}}\n"
+        "  params:\n    url: https://example.org/data/\n    link_pattern: '/files/.*\\.html$'\n"
+        "    date_pattern: '(\\d{4}-\\d{2})'\n"
+        "    columns: {Town: entity, Super: 'value:super', Diesel: 'value:diesel'}\n"
+    )
+    return await fetch_series("x.cpi", ctx)
+
+
+def _table(*rows: str) -> str:
+    head = "<tr><th>Town</th><th>Super</th><th>Diesel</th></tr>"
+    ok = "<tr><td>Kisumu</td><td>181</td><td>171</td></tr>"  # keeps header detection honest
+    return f"<table>{head}{ok}{''.join(rows)}</table>"
+
+
+async def test_spanned_cell_quarantines_and_stores_no_diesel(ctx, respx_mock, tmp_home):
+    body = _table(
+        "<tr><td>Nairobi</td><td colspan=2>180.50</td></tr>",
+        "<tr><td>Mombasa</td><td>179</td><td>169</td></tr>",
+    )
+    out = await _listing_run(ctx, respx_mock, tmp_home, body)
+    assert out.report and out.report.status == "quarantined"
+    assert any("spanned" in f for f in out.report.failures)
+    assert SeriesStore(ctx.home.db_path).latest("x.cpi") == []
+
+
+async def test_cell_unit_pct_in_kes_series_quarantines(ctx, respx_mock, tmp_home):
+    body = _table("<tr><td>Nairobi</td><td>180</td><td>45%</td></tr>")
+    out = await _listing_run(ctx, respx_mock, tmp_home, body)
+    assert out.report and out.report.status == "quarantined"
+    assert any("unit mismatch" in f for f in out.report.failures)
+
+
+async def test_na_cell_is_missing_not_a_failure(ctx, respx_mock, tmp_home):
+    body = _table("<tr><td>Nairobi</td><td>180</td><td>n/a</td></tr>")
+    out = await _listing_run(ctx, respx_mock, tmp_home, body)
+    assert out.report and out.report.status == "accepted"
+    assert out.added == AddResult(new=3, unchanged=0, revised=0)  # no Nairobi diesel
+
+
+async def test_unparsable_cell_quarantines(ctx, respx_mock, tmp_home):
+    body = _table("<tr><td>Nairobi</td><td>180</td><td>USD 5</td></tr>")
+    out = await _listing_run(ctx, respx_mock, tmp_home, body)
+    assert out.report and out.report.status == "quarantined"
+    assert any("unparsable value 'USD 5'" in f for f in out.report.failures)
+    assert SeriesStore(ctx.home.db_path).latest("x.cpi") == []
+
+
+async def test_compound_series_unit_survives_currency_cells(ctx, respx_mock, tmp_home):
+    body = _table("<tr><td>Nairobi</td><td>Sh180.5</td><td>170</td></tr>")
+    out = await _listing_run(ctx, respx_mock, tmp_home, body, unit="KES/L")
+    assert out.report and out.report.status == "accepted"

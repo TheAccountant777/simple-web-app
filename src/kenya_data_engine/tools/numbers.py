@@ -81,6 +81,11 @@ def _build(m: re.Match[str], *, parens: bool) -> ParsedNumber | None:
     return ParsedNumber(value=-value if negative else value, raw=raw, unit=unit, scale=scale)
 
 
+def is_missing(text: str) -> bool:
+    """A placeholder meaning "no value" ("-", "n/a", ".."): not an unparsable cell."""
+    return text.strip().lower() in _MISSING
+
+
 def parse_number(text: str) -> ParsedNumber | None:
     """Parse one cell/value; None for placeholders ("-", "n/a", "..") and non-numbers."""
     s = text.strip()

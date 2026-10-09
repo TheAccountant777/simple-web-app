@@ -151,3 +151,10 @@ def test_metrics_allowed_and_unknown_quarantined():
     assert check_observations([ob("super"), ob("diesel")], spec, []).status == "accepted"
     bad = check_observations([ob("gold")], spec, [])
     assert bad.status == "quarantined" and "gold" in bad.failures[0]
+
+
+def test_rejects_become_failures_even_without_observations() -> None:
+    r = check_observations([], _spec(entities=[]), [], ["t0/r1/c2: unparsable value 'x'"])
+    assert r.status == "quarantined" and r.failures == ["t0/r1/c2: unparsable value 'x'"]
+    r = check_observations([_o("Nairobi", "180"), _o("Mombasa", "179")], _spec(), [], ["bad"])
+    assert r.status == "quarantined" and r.failures == ["bad"]

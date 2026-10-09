@@ -17,6 +17,11 @@ __all__ = ["Locator", "RawTable", "extract_tables", "table_to_frame"]
 
 def _dispatch(content: bytes, locator: Locator, cfg: DataConfig) -> list[RawTable]:
     kind = sniff(content)
+    if kind in ("xlsx", "csv") and len(content) > cfg.max_bytes["sheet"]:
+        raise ExtractError(
+            f"{kind} too large ({len(content)} > {cfg.max_bytes['sheet']} bytes)",
+            hint="Raise data.max_bytes.sheet if this file is legitimate.",
+        )
     if kind == "xlsx":
         return read_xlsx(content, locator, cfg.max_bytes["sheet"])
     if kind == "csv":
