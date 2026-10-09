@@ -88,3 +88,31 @@ def test_referenced_blobs(tmp_path: Path) -> None:
     s = SeriesStore(tmp_path / "e.db")
     s.add([_obs("1", blob="b" * 64)])
     assert s.referenced_blobs() == {"b" * 64}
+
+
+def test_concurrent_revisions_get_distinct_vintages(tmp_path: Path) -> None:
+    import threading
+
+    db = tmp_path / "e.db"
+    SeriesStore(db).add([_obs("1")])
+    errors: list[BaseException] = []
+
+    def work(v: str) -> None:
+        try:
+            SeriesStore(db).add([_obs(v)])
+        except BaseException as exc:
+            errors.append(exc)
+
+    threads = [threading.Thread(target=work, args=(v,)) for v in ("2", "3")]
+    [t.start() for t in threads]
+    [t.join() for t in threads]
+    assert errors == []
+    hist = SeriesStore(db).history("epra.pump", "2026-09", "Nairobi", "super")
+    assert [h.vintage for h in hist] == [1, 2, 3]
+
+
+def test_blob_path_validates_sha(tmp_path: Path) -> None:
+    import pytest
+
+    with pytest.raises(ValueError):
+        BlobStore(tmp_path).path("../etc/passwd")

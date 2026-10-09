@@ -8,21 +8,33 @@ from selectolax.lexbor import LexborNode as Node
 from kenya_data_engine.data.extract.grid import Locator, RawTable, build_table, clean
 
 
+def _span(cell: Node, attr: str) -> int:
+    try:
+        return max(1, min(int(cell.attributes.get(attr) or 1), 50))
+    except ValueError:
+        return 1
+
+
 def _grid(table: Node) -> list[list[str]]:
-    rows: list[list[str]] = []
-    for tr in table.css("tr"):
-        row: list[str] = []
+    """Expand colspan and rowspan so every cell lands in its true column."""
+    grid: dict[tuple[int, int], str] = {}
+    for r, tr in enumerate(table.css("tr")):
+        c = 0
         for cell in tr.iter():
             if cell.tag not in ("td", "th"):
                 continue
-            row.append(clean(cell.text(separator=" ")))
-            try:
-                span = int(cell.attributes.get("colspan") or 1)
-            except ValueError:
-                span = 1
-            row.extend([""] * (max(1, min(span, 50)) - 1))
-        rows.append(row)
-    return rows
+            while (r, c) in grid:
+                c += 1
+            text = clean(cell.text(separator=" "))
+            for dr in range(_span(cell, "rowspan")):
+                for dc in range(_span(cell, "colspan")):
+                    grid[(r + dr, c + dc)] = text
+            c += _span(cell, "colspan")
+    if not grid:
+        return []
+    height = max(r for r, _ in grid) + 1
+    width = max(c for _, c in grid) + 1
+    return [[grid.get((r, c), "") for c in range(width)] for r in range(height)]
 
 
 def read_html(content: bytes, locator: Locator) -> list[RawTable]:

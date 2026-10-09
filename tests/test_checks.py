@@ -105,3 +105,14 @@ def test_period_type_mismatch_quarantines() -> None:
     )
     r = check_observations([o], _spec(entities=[]), [])
     assert r.status == "quarantined"
+
+
+def test_empty_quarantines() -> None:
+    assert check_observations([], _spec(entities=[]), []).status == "quarantined"
+
+
+def test_same_entity_different_metrics_not_duplicate() -> None:
+    a = _o("Nairobi", "180")
+    b = a.model_copy(update={"metric": "diesel", "value": Decimal("170")})
+    r = check_observations([a, b], _spec(entities=[]), [])
+    assert not any("duplicate" in f for f in r.failures)

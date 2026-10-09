@@ -25,18 +25,32 @@ def read_xlsx(content: bytes, locator: Locator, max_bytes: int) -> list[RawTable
         with zipfile.ZipFile(io.BytesIO(content)) as zf:
             if sum(i.file_size for i in zf.infolist()) > ZIP_RATIO * max_bytes:
                 raise ExtractError("xlsx expands beyond the allowed size", hint="Zip bomb guard.")
-        wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True, data_only=True)
-    except (zipfile.BadZipFile, KeyError, OSError) as exc:
+        wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
+    except ExtractError:
+        raise
+    except Exception as exc:  # openpyxl and the XML layer raise many types on bad input
         raise ExtractError(f"unreadable xlsx: {exc}") from exc
     try:
         name = locator.sheet or wb.sheetnames[0]
         if name not in wb.sheetnames:
             raise ExtractError(f"sheet {name!r} not found", hint=f"Sheets: {wb.sheetnames}")
+        ws = wb[name]
         cells: list[list[str]] = []
         locs: list[list[str]] = []
-        for r, row in enumerate(wb[name].iter_rows(values_only=True), start=1):
+        for r, row in enumerate(ws.iter_rows(values_only=True), start=1):
             cells.append([_text(v) for v in row])
             locs.append([f"{name}!{get_column_letter(c)}{r}" for c in range(1, len(row) + 1)])
+        for rng in ws.merged_cells.ranges:  # fill only within merged ranges
+            if rng.min_row > len(cells) or rng.min_col > len(cells[rng.min_row - 1]):
+                continue
+            top = cells[rng.min_row - 1][rng.min_col - 1]
+            for r in range(rng.min_row, min(rng.max_row, len(cells)) + 1):
+                for c in range(rng.min_col, min(rng.max_col, len(cells[r - 1])) + 1):
+                    cells[r - 1][c - 1] = top
+    except ExtractError:
+        raise
+    except Exception as exc:
+        raise ExtractError(f"unreadable xlsx: {exc}") from exc
     finally:
         wb.close()
     table = build_table(cells, locs, locator, f"openpyxl@{openpyxl.__version__}", "xlsx")

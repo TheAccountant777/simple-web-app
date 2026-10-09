@@ -107,13 +107,13 @@ async def test_html_table_by_css() -> None:
         "<div id='wrap'><table><tr><td>Q</td></tr></table></div></body></html>"
     )
     (t,) = await extract_tables(html.encode(), Locator(css="table#prices"), CFG)
-    assert t.header == ["Town", "Pump", "Pump"] or t.header[0] == "Town"
+    assert t.header == ["Town", "Pump", "Pump"]
     assert t.rows == [["Nairobi", "180.66", "170.5"]]
     assert t.cell_locators[0][2] == "t0/r1/c2"
     assert t.source_kind == "html"
     assert len(await extract_tables(html.encode(), Locator(), CFG)) == 3
     wrapped = await extract_tables(html.encode(), Locator(css="#wrap"), CFG)
-    assert wrapped[0].rows == [] or wrapped[0].header == ["Q"]
+    assert wrapped[0].header == ["Q"] and wrapped[0].rows == []
 
 
 def _pdf(pages: int = 2) -> bytes:
@@ -190,3 +190,45 @@ def test_rawtable_model() -> None:
         header=["a"], rows=[["1"]], cell_locators=[["t0/r1/c0"]], extractor="x", source_kind="csv"
     )
     assert table_to_frame(t).iloc[0, 0] == "1"
+
+
+async def test_unmerged_blank_upper_cell_stays_blank() -> None:
+    def build(ws: Any) -> None:
+        ws.append(["Town", None, "Pump", None])
+        ws.append([None, "Region", "Super", "Diesel"])
+        ws.append(["Nairobi", "Central", 180.5, 170.5])
+
+    (t,) = await extract_tables(_xlsx(build), Locator(header_rows=2), CFG)
+    assert t.header == ["Town", "Region", "Pump / Super", "Diesel"]
+
+
+async def test_merged_range_fills_header() -> None:
+    (t,) = await extract_tables(_xlsx(_merged), Locator(), CFG)
+    assert t.header[1:] == ["Pump prices / Super", "Pump prices / Diesel"]
+
+
+async def test_html_colspan_rowspan_align() -> None:
+    html = (
+        "<table><tr><th rowspan='2'>Town</th><th colspan='2'>Pump</th></tr>"
+        "<tr><th>Super</th><th>Diesel</th></tr>"
+        "<tr><td>Nairobi</td><td>180</td><td>170</td></tr></table>"
+    )
+    (t,) = await extract_tables(html.encode(), Locator(header_rows=2), CFG)
+    assert t.header == ["Town", "Pump / Super", "Pump / Diesel"]
+    assert t.rows == [["Nairobi", "180", "170"]]
+
+
+async def test_notional_row_not_footnote() -> None:
+    csv = b"Town,Value\nNotional,1\nSourcing,2\nSource: EPRA,\nNote 1,\n"
+    (t,) = await extract_tables(csv, Locator(), CFG)
+    assert t.rows == [["Notional", "1"], ["Sourcing", "2"]]
+
+
+async def test_corrupt_xlsx_raises_extract_error() -> None:
+    import zipfile
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("xl/workbook.xml", "<not xml")
+    with pytest.raises(ExtractError):
+        await extract_tables(buf.getvalue(), Locator(), CFG)

@@ -25,7 +25,7 @@ class RawTable(BaseModel):
     source_kind: Literal["csv", "xlsx", "html", "pdf"]
 
 
-_FOOTNOTE = re.compile(r"(?:source|note|\*|\d{1,2}\))", re.IGNORECASE)
+_FOOTNOTE = re.compile(r"(?:(?:source|note)s?(?:[:.)\s]|$)|\*|\d{1,2}\))", re.IGNORECASE)
 _WS = re.compile(r"\s+")
 
 
@@ -56,14 +56,7 @@ def _detect_header_rows(rows: list[list[str]]) -> int:
 
 
 def _flatten(header_rows: list[list[str]], width: int) -> list[str]:
-    filled: list[list[str]] = []
-    for i, row in enumerate(header_rows):
-        row = list(row)
-        if i < len(header_rows) - 1:  # merged cells only span the upper header rows
-            for c in range(1, width):
-                if not row[c] and row[c - 1]:
-                    row[c] = row[c - 1]
-        filled.append(row)
+    filled = header_rows  # merged cells are expanded by the reader; blanks stay blank
     out: list[str] = []
     for c in range(width):
         parts: list[str] = []

@@ -2,6 +2,7 @@
 
 import hashlib
 import os
+import re
 import sqlite3
 import tempfile
 import time
@@ -14,6 +15,8 @@ from typing import Any, NamedTuple
 from kenya_data_engine.data.models import Observation, Provenance, StoredObservation
 from kenya_data_engine.data.periods import Period
 
+_SHA = re.compile(r"[0-9a-f]{64}")
+
 
 class BlobStore:
     def __init__(self, root: Path) -> None:
@@ -21,6 +24,8 @@ class BlobStore:
         root.mkdir(parents=True, exist_ok=True)
 
     def path(self, sha: str) -> Path:
+        if not _SHA.fullmatch(sha):
+            raise ValueError(f"not a sha256 hex digest: {sha!r}")
         return self.root / sha[:2] / sha
 
     def put(self, content: bytes) -> str:
@@ -67,6 +72,13 @@ _COLUMNS = (
 )
 
 
+_REVISED = (
+    "EXISTS (SELECT 1 FROM observations p WHERE p.series=o.series AND "
+    "p.period_label=o.period_label AND p.entity=o.entity AND p.metric=o.metric "
+    "AND p.vintage<o.vintage AND p.value<>o.value)"
+)
+
+
 class SeriesStore:
     def __init__(self, db_path: Path) -> None:
         self.db_path = db_path
@@ -81,51 +93,63 @@ class SeriesStore:
             )
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=30, isolation_level=None)
         conn.execute("PRAGMA journal_mode=WAL")
         return conn
 
     def add(self, obs: list[Observation]) -> AddResult:
         new = unchanged = revised = 0
-        with closing(self._connect()) as conn, conn:
-            for o in obs:
-                key = (o.series, o.period.label, o.entity, o.metric)
-                row = conn.execute(
-                    "SELECT value, vintage FROM observations WHERE series=? AND period_label=? "
-                    "AND entity=? AND metric=? ORDER BY vintage DESC LIMIT 1",
-                    key,
-                ).fetchone()
-                if row is not None and Decimal(row[0]) == o.value:
-                    unchanged += 1
-                    continue
-                vintage = 1 if row is None else row[1] + 1
-                p = o.provenance
-                conn.execute(
-                    f"INSERT INTO observations ({_COLUMNS}) VALUES ({','.join('?' * 16)})",
-                    (
-                        o.series,
-                        o.period.label,
-                        o.period.type,
-                        o.period.start.isoformat(),
-                        o.period.end.isoformat(),
-                        o.entity,
-                        o.metric,
-                        str(o.value),
-                        o.unit,
-                        vintage,
-                        p.url,
-                        p.blob_sha256,
-                        p.retrieved_at.isoformat(),
-                        p.published.isoformat() if p.published else None,
-                        p.locator,
-                        p.extractor,
-                    ),
-                )
-                if row is None:
-                    new += 1
-                else:
-                    revised += 1
+        with closing(self._connect()) as conn:
+            conn.execute("BEGIN IMMEDIATE")  # writers serialize; vintages cannot collide
+            try:
+                new, unchanged, revised = self._add_rows(conn, obs)
+            except BaseException:
+                conn.execute("ROLLBACK")
+                raise
+            conn.execute("COMMIT")
         return AddResult(new, unchanged, revised)
+
+    @staticmethod
+    def _add_rows(conn: sqlite3.Connection, obs: list[Observation]) -> tuple[int, int, int]:
+        new = unchanged = revised = 0
+        for o in obs:
+            key = (o.series, o.period.label, o.entity, o.metric)
+            row = conn.execute(
+                "SELECT value, vintage FROM observations WHERE series=? AND period_label=? "
+                "AND entity=? AND metric=? ORDER BY vintage DESC LIMIT 1",
+                key,
+            ).fetchone()
+            if row is not None and Decimal(row[0]) == o.value:
+                unchanged += 1
+                continue
+            vintage = 1 if row is None else row[1] + 1
+            p = o.provenance
+            conn.execute(
+                f"INSERT INTO observations ({_COLUMNS}) VALUES ({','.join('?' * 16)})",
+                (
+                    o.series,
+                    o.period.label,
+                    o.period.type,
+                    o.period.start.isoformat(),
+                    o.period.end.isoformat(),
+                    o.entity,
+                    o.metric,
+                    str(o.value),
+                    o.unit,
+                    vintage,
+                    p.url,
+                    p.blob_sha256,
+                    p.retrieved_at.isoformat(),
+                    p.published.isoformat() if p.published else None,
+                    p.locator,
+                    p.extractor,
+                ),
+            )
+            if row is None:
+                new += 1
+            else:
+                revised += 1
+        return new, unchanged, revised
 
     @staticmethod
     def _to_obs(r: tuple[Any, ...], revised: bool) -> StoredObservation:
@@ -157,17 +181,9 @@ class SeriesStore:
         with closing(self._connect()) as conn:
             return conn.execute(sql, args).fetchall()
 
-    def _revised(self, r: tuple[Any, ...]) -> bool:
-        rows = self._rows(
-            "SELECT value FROM observations WHERE series=? AND period_label=? AND entity=? "
-            "AND metric=? AND vintage<?",
-            (r[0], r[1], r[5], r[6], r[9]),
-        )
-        return any(Decimal(v[0]) != Decimal(r[7]) for v in rows)
-
     def latest(self, series: str, entity: str | None = None) -> list[StoredObservation]:
         sql = (
-            f"SELECT {_COLUMNS} FROM observations o WHERE series=? "
+            f"SELECT {_COLUMNS}, {_REVISED} FROM observations o WHERE series=? "
             "AND vintage = (SELECT MAX(vintage) FROM observations i WHERE i.series=o.series "
             "AND i.period_label=o.period_label AND i.entity=o.entity AND i.metric=o.metric)"
         )
@@ -176,17 +192,17 @@ class SeriesStore:
             sql += " AND entity=?"
             args += (entity,)
         sql += " ORDER BY start, period_label, entity, metric"
-        return [self._to_obs(r, self._revised(r)) for r in self._rows(sql, args)]
+        return [self._to_obs(r, bool(r[16])) for r in self._rows(sql, args)]
 
     def history(
         self, series: str, period_label: str, entity: str, metric: str
     ) -> list[StoredObservation]:
         rows = self._rows(
-            f"SELECT {_COLUMNS} FROM observations WHERE series=? AND period_label=? AND entity=? "
-            "AND metric=? ORDER BY vintage",
+            f"SELECT {_COLUMNS}, {_REVISED} FROM observations o WHERE series=? "
+            "AND period_label=? AND entity=? AND metric=? ORDER BY vintage",
             (series, period_label, entity, metric),
         )
-        return [self._to_obs(r, self._revised(r)) for r in rows]
+        return [self._to_obs(r, bool(r[16])) for r in rows]
 
     def series_keys(self) -> list[str]:
         return [r[0] for r in self._rows("SELECT DISTINCT series FROM observations ORDER BY 1", ())]

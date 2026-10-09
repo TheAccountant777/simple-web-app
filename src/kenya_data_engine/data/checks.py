@@ -23,6 +23,8 @@ def check_observations(
 ) -> CheckReport:
     failures: list[str] = []
     warnings: list[str] = []
+    if not obs:
+        failures.append("no observations extracted")
 
     seen: dict[tuple[str, str, str], Decimal] = {}
     for o in obs:
@@ -35,7 +37,7 @@ def check_observations(
             failures.append(f"{where} value {o.value} below minimum {spec.min_value}")
         if spec.max_value is not None and o.value > spec.max_value:
             failures.append(f"{where} value {o.value} above maximum {spec.max_value}")
-        key = (o.period.label, o.entity, o.metric)
+        key = (o.period.label, o.metric, o.entity)
         if key in seen and seen[key] != o.value:
             failures.append(f"duplicate key {where} {o.metric} has conflicting values")
         seen.setdefault(key, o.value)
@@ -50,17 +52,17 @@ def check_observations(
     if before and now < before:
         failures.append(f"fewer rows than before: {now} < {before}")
 
-    by_period: dict[str, dict[str, Decimal]] = defaultdict(dict)
-    for (label, entity, _), value in seen.items():
-        by_period[label][entity] = value
+    by_period: dict[tuple[str, str], dict[str, Decimal]] = defaultdict(dict)
+    for (label, metric, entity), value in seen.items():
+        by_period[(label, metric)][entity] = value
     for total, parts in spec.totals:
-        for label, ents in by_period.items():
+        for (label, metric), ents in by_period.items():
             if total not in ents or any(p not in ents for p in parts):
                 continue
             diff = abs(sum((ents[p] for p in parts), Decimal(0)) - ents[total])
             if diff > spec.total_tolerance:
                 failures.append(
-                    f"totals mismatch {total} {label}: components differ by {diff} "
+                    f"totals mismatch {total} {label} {metric}: components differ by {diff} "
                     f"(tolerance {spec.total_tolerance})"
                 )
 
