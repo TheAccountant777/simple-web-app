@@ -8,6 +8,8 @@ from typing import Annotated, Literal
 
 import typer
 from pydantic import BaseModel, TypeAdapter
+from pydantic_ai import Agent
+from pydantic_ai.models import Model
 from rich.table import Table
 from rich.text import Text
 
@@ -15,17 +17,19 @@ from kenya_data_engine.cli.common import State, get_state, guarded, probe_contex
 from kenya_data_engine.cli.ui import badge, console, err_console
 from kenya_data_engine.config import legacy_radar_keys
 from kenya_data_engine.context import RunContext
-from kenya_data_engine.errors import ConfigError
+from kenya_data_engine.errors import ConfigError, EngineError
 from kenya_data_engine.health import failing_label
+from kenya_data_engine.llm import run_agent
 from kenya_data_engine.radar.base import Adapter, build_adapters, fetch_with_timeout, record_health
 from kenya_data_engine.tools.search import build_search
 
-Group = Literal["keys", "llm", "search", "config", "sources"]
+Group = Literal["keys", "llm", "agents", "search", "config", "sources"]
 Status = Literal["ok", "warn", "fail", "skip"]
 
 GROUP_TITLES: dict[str, str] = {
     "keys": "API keys",
     "llm": "LLM",
+    "agents": "Agents",
     "search": "Search",
     "config": "Config",
     "sources": "Radar sources",
@@ -150,6 +154,48 @@ async def _search_probe(ctx: RunContext) -> tuple[Status, str]:
     return "ok", f"{len(results)} result: {results[0].title[:50]}"
 
 
+class Sum(BaseModel):
+    total: int
+
+
+_FALLBACK_HINT = (
+    "research agents need tool use plus structured output in one run. If this fails, switch to "
+    "the two-phase fallback (tool phase in plain text, then a separate structured-output call; "
+    "spec section 3)"
+)
+
+
+async def _agent_probe(ctx: RunContext, model: Model | None = None) -> tuple[Status, str]:
+    """Run a one-tool agent with structured output: the live check research agents rely on."""
+    if model is None and ctx.secrets.deepseek_api_key is None:
+        return "skip", "no DeepSeek key"
+    calls: list[tuple[int, int]] = []
+    agent = Agent(output_type=Sum)
+
+    @agent.tool_plain
+    def add(a: int, b: int) -> int:
+        calls.append((a, b))
+        return a + b
+
+    try:
+        out = await run_agent(
+            agent,
+            "Use the add tool to add 2 and 3, then report the total.",
+            ctx,
+            stage="research_smoke",
+            name="agent_probe",
+            model=model,
+        )
+    except EngineError as exc:
+        hint = f"{exc.hint}; " if exc.hint else ""
+        return "fail", f"{exc.message} ({hint}{_FALLBACK_HINT})"
+    if not calls:
+        return "fail", f"the model never called the add tool ({_FALLBACK_HINT})"
+    if out.total != 5:
+        return "fail", f"expected total 5, got {out.total} ({_FALLBACK_HINT})"
+    return "ok", "tool use + structured output ok"
+
+
 def _source_probe(ctx: RunContext, adapter: Adapter) -> Callable[[], Awaitable[tuple[Status, str]]]:
     async def probe() -> tuple[Status, str]:
         since = datetime.now(UTC) - timedelta(days=30)
@@ -168,12 +214,14 @@ def _source_probe(ctx: RunContext, adapter: Adapter) -> Callable[[], Awaitable[t
     return probe
 
 
-async def run_checks(ctx: RunContext) -> list[Check]:
+async def run_checks(ctx: RunContext, *, agents: bool = False) -> list[Check]:
     """Run every check concurrently. Individual checks never raise."""
     coros: list[Awaitable[Check]] = [
         _timed(ctx, "DeepSeek /models", "llm", lambda: _llm_probe(ctx)),
         _timed(ctx, "Web search", "search", lambda: _search_probe(ctx)),
     ]
+    if agents:
+        coros.append(_timed(ctx, "agents: tool use", "agents", lambda: _agent_probe(ctx)))
     for adapter in build_adapters(ctx.config, ctx.home):
         coros.append(_timed(ctx, adapter.name, "sources", _source_probe(ctx, adapter)))
     return [*_key_checks(ctx), *_config_checks(ctx), *await asyncio.gather(*coros)]
@@ -213,13 +261,17 @@ def summary_line(checks: list[Check]) -> Text:
     return line
 
 
-async def _collect(state: State) -> list[Check]:
+async def _collect(state: State, agents: bool = False) -> list[Check]:
     async with probe_context(state) as ctx:  # doctor leaves no run behind
-        return await run_checks(ctx)
+        return await (run_checks(ctx, agents=True) if agents else run_checks(ctx))
 
 
 def run_doctor(
-    state: State, *, json_out: bool = False, blocking: frozenset[str] | None = None
+    state: State,
+    *,
+    json_out: bool = False,
+    blocking: frozenset[str] | None = None,
+    agents: bool = False,
 ) -> int:
     """Run and print the checks; return the exit code (1 if a check in `blocking` failed).
 
@@ -227,10 +279,10 @@ def run_doctor(
     in other groups are shown as a note that the run continues without them.
     """
     if json_out or state.quiet:
-        checks = asyncio.run(_collect(state))
+        checks = asyncio.run(_collect(state, agents))
     else:
         with err_console.status("[accent]Running checks…[/]"):
-            checks = asyncio.run(_collect(state))
+            checks = asyncio.run(_collect(state, agents))
     if json_out:
         typer.echo(TypeAdapter(list[Check]).dump_json(checks, indent=2).decode())
     else:
@@ -254,6 +306,10 @@ def doctor(
     json_out: Annotated[
         bool, typer.Option("--json", help="Print the checks as JSON on stdout.")
     ] = False,
+    agents: Annotated[
+        bool,
+        typer.Option("--agents", help="Also run a live tool-use + structured-output agent test."),
+    ] = False,
 ) -> None:
     """Check API keys, the LLM, web search and every Radar source.
 
@@ -263,7 +319,8 @@ def doctor(
     Examples:
       engine doctor
       engine doctor --json
+      engine doctor --agents
     """
-    code = run_doctor(get_state(ctx), json_out=json_out)
+    code = run_doctor(get_state(ctx), json_out=json_out, agents=agents)
     if code:
         raise typer.Exit(code)

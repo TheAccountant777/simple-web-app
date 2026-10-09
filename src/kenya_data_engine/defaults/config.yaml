@@ -26,6 +26,10 @@ llm:
       model: deepseek-flash
       max_tokens: 4096
       extra_body: {thinking: {type: disabled}}
+    research_smoke:
+      model: deepseek-flash
+      max_tokens: 512
+      extra_body: {thinking: {type: disabled}}
 
 budgets:
   run_usd: 0.50

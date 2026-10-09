@@ -211,3 +211,61 @@ def test_doctor_exit_code_ignores_skips(cli_no_keys, monkeypatch):
 
     monkeypatch.setattr(doctor_mod, "run_checks", fake)
     assert cli_no_keys.invoke(app, ["doctor"]).exit_code == 0
+
+
+def _smoke_model(total, call_tool=True):
+    from pydantic_ai.messages import ModelResponse, ToolCallPart, ToolReturnPart
+    from pydantic_ai.models.function import FunctionModel
+
+    def fn(messages, info):
+        returned = any(
+            isinstance(p, ToolReturnPart) for m in messages for p in getattr(m, "parts", [])
+        )
+        if call_tool and not returned:
+            return ModelResponse(parts=[ToolCallPart("add", {"a": 2, "b": 3})])
+        return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {"total": total})])
+
+    return FunctionModel(fn)
+
+
+async def test_agent_probe_ok(ctx):
+    status, detail = await doctor_mod._agent_probe(ctx, _smoke_model(5))
+    assert status == "ok" and detail == "tool use + structured output ok"
+
+
+async def test_agent_probe_wrong_total_fails(ctx):
+    status, detail = await doctor_mod._agent_probe(ctx, _smoke_model(6))
+    assert status == "fail" and "two-phase" in detail
+
+
+async def test_agent_probe_tool_never_called_fails(ctx):
+    status, detail = await doctor_mod._agent_probe(ctx, _smoke_model(5, call_tool=False))
+    assert status == "fail" and "never called" in detail
+
+
+async def test_agent_probe_engine_error_fails_with_hint(ctx):
+    def boom(_):
+        raise ModelHTTPError(429, "x")
+
+    from conftest import function_model_returning
+    from pydantic_ai.exceptions import ModelHTTPError
+
+    status, detail = await doctor_mod._agent_probe(ctx, function_model_returning(boom))
+    assert status == "fail" and "rate-limiting" in detail and "two-phase" in detail
+
+
+async def test_agent_probe_skips_without_key(ctx_no_keys):
+    status, _ = await doctor_mod._agent_probe(ctx_no_keys)
+    assert status == "skip"
+
+
+def test_doctor_agents_flag_lists_check(cli_no_keys, monkeypatch, respx_mock):
+    async def fake_probe(ctx, model=None):
+        return "ok", "tool use + structured output ok"
+
+    monkeypatch.setattr(doctor_mod, "_agent_probe", fake_probe)
+    respx_mock.route().mock(side_effect=httpx.ConnectError("down"))
+    r = cli_no_keys.invoke(app, ["doctor", "--agents"], env={"COLUMNS": "200"})
+    assert "agents" in r.stdout and "structured output ok" in r.stdout
+    plain = cli_no_keys.invoke(app, ["doctor"], env={"COLUMNS": "200"})
+    assert "structured output ok" not in plain.stdout
