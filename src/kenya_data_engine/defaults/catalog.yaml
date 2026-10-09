@@ -1,0 +1,126 @@
+# Series catalog: one entry per series or document source, keyed by name.
+#
+# Fields
+#   adapter:   worldbank | sdmx | listing
+#   title, publisher, tier (1-4), enabled, note
+#   spec:      SeriesSpec (metric, unit, period_type, min_value, max_value, max_step_pct, ...)
+#              omit for document-only entries (they only discover links)
+#   params:    adapter-specific
+#     worldbank: indicator
+#     sdmx:      base_url, flow, key, start_period, entity
+#     listing:   url, link_pattern (regex on href), date_pattern (regex on link text/href,
+#                group 1 or whole match goes through parse_period), locator, columns
+#                ({source header: entity | period | value:<metric>})
+#
+# Your <home>/catalog.yaml is merged over this file by key, field by field.
+# Entries other than the two World Bank ones are UNVERIFIED (see
+# docs/research/2026-10-09-kenya-data-catalog.md): run `engine catalog probe <key>` on the laptop,
+# fix the URL and pattern, then enable.
+
+wb:FP.CPI.TOTL.ZG:
+  adapter: worldbank
+  title: Kenya inflation, consumer prices (annual %)
+  publisher: World Bank
+  tier: 1
+  spec: {metric: inflation, unit: "%", period_type: year}
+  params: {indicator: FP.CPI.TOTL.ZG}
+
+wb:PA.NUS.FCRF:
+  adapter: worldbank
+  title: Official exchange rate (KES per USD, period average)
+  publisher: World Bank
+  tier: 1
+  spec: {metric: kes_per_usd, unit: KES/USD, period_type: year, min_value: 0}
+  params: {indicator: PA.NUS.FCRF}
+
+imf:cpi:
+  adapter: sdmx
+  title: Kenya consumer price index (IMF)
+  publisher: IMF
+  tier: 2
+  enabled: false
+  note: endpoint unverified; run engine catalog probe
+  spec: {metric: cpi_index, unit: index, period_type: month}
+  params:
+    base_url: https://data.imf.org
+    flow: CPI
+    key: KEN.CPI.IX.M
+    start_period: "2015"
+
+epra.pump_prices:
+  adapter: listing
+  title: EPRA maximum retail pump prices by town
+  publisher: EPRA
+  tier: 1
+  enabled: false
+  note: unverified; parser pending real samples
+  spec:
+    metric: pump_price
+    unit: KES
+    period_type: epra_cycle
+    min_value: 50
+    max_value: 500
+    max_step_pct: 15
+  params:
+    url: https://www.epra.go.ke/
+    link_pattern: '(?i)(maximum|pump).*price.*\.pdf$'
+    date_pattern: '(\d{4}-\d{2}-\d{2})'
+
+cbk.weekly_bulletin:
+  adapter: listing
+  title: CBK Weekly Bulletin
+  publisher: CBK
+  tier: 1
+  enabled: false
+  note: unverified; parser pending real samples
+  params:
+    url: https://www.centralbank.go.ke/weekly-bulletin/
+    link_pattern: '(?i)/uploads/weekly_bulletin/.*\.pdf$'
+    date_pattern: '([A-Za-z]{3,9}\.? \d{4})'
+
+knbs.cpi:
+  adapter: listing
+  title: KNBS Consumer Price Indices and Inflation Rates
+  publisher: KNBS
+  tier: 1
+  enabled: false
+  note: unverified; parser pending real samples
+  params:
+    url: https://www.knbs.or.ke/
+    link_pattern: '(?i)wp-content/uploads/\d{4}/\d{2}/.*cpi.*\.pdf$'
+    date_pattern: '([A-Za-z]{3,9}\.? \d{4})'
+
+cma.bulletins:
+  adapter: listing
+  title: CMA Quarterly Statistical Bulletin
+  publisher: CMA
+  tier: 2
+  enabled: false
+  note: unverified; parser pending real samples
+  params:
+    url: https://www.cma.or.ke/
+    link_pattern: '(?i)/download/\d+/\d{4}/\d+/.*bulletin.*\.pdf$'
+    date_pattern: '(?i)(q[1-4]-\d{4})'
+
+treasury.qebr:
+  adapter: listing
+  title: National Treasury Quarterly Economic and Budgetary Review
+  publisher: National Treasury
+  tier: 1
+  enabled: false
+  note: unverified; parser pending real samples
+  params:
+    url: https://www.treasury.go.ke/quarterly-economic-and-budgetary-review/
+    link_pattern: '(?i)QEBR.*\.pdf$'
+
+kenyalaw.gazette:
+  adapter: listing
+  title: Kenya Gazette issues
+  publisher: Kenya Law
+  tier: 2
+  enabled: false
+  note: unverified; parser pending real samples
+  params:
+    url: https://new.kenyalaw.org/gazettes/
+    link_pattern: '/akn/ke/officialGazette/\d{4}-\d{2}-\d{2}/'
+    date_pattern: '(\d{4}-\d{2}-\d{2})'

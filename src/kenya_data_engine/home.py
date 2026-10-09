@@ -22,6 +22,10 @@ class EngineHome:
         return self.root / "sources.yaml"
 
     @property
+    def catalog_path(self) -> Path:
+        return self.root / "catalog.yaml"
+
+    @property
     def certs_dir(self) -> Path:
         return self.root / "certs"
 

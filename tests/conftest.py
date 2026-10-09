@@ -78,3 +78,15 @@ def mock_sources(respx_mock, home) -> None:
     for name, spec in load_sources(home).specs.items():
         body = rss_xml(name) if spec.type == "rss" else listing_html(name, spec)
         respx_mock.get(spec.url).respond(200, content=body.encode())
+
+
+@pytest.fixture
+def data_net(monkeypatch):
+    """Data-layer HTTP without DNS or retry sleeps: every host resolves to a public address."""
+    import tenacity
+
+    async def resolve(host: str) -> list[str]:
+        return ["93.184.216.34"]
+
+    monkeypatch.setattr("kenya_data_engine.data.adapters.base.DNS_RESOLVER", resolve)
+    monkeypatch.setattr("kenya_data_engine.http._WAIT", tenacity.wait_none())
