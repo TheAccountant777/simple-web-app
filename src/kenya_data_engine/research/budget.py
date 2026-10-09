@@ -150,6 +150,11 @@ class Ledger:
 
     def charge_credits(self, group: str, credits: int) -> None:
         g = self._group(group)
+        if self.phase() is Phase.EXPIRED:
+            raise BudgetExceeded(
+                f"research time budget of {self.preset.seconds:.0f}s is used up",
+                hint="use a deeper budget preset for more time",
+            )
         if g.closed or g.credits_spent + credits > g.credits_cap:
             raise BudgetExceeded(
                 f"{group} search credits exhausted "

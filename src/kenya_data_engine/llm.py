@@ -32,6 +32,7 @@ from kenya_data_engine.trace import Tracer
 log = logging.getLogger(__name__)
 
 _PRIMER_MARKER = "{{primer}}"
+DEFAULT_MAX_TOKENS = 4096  # output reservation when a stage sets no max_tokens
 
 
 def build_model(ctx: RunContext, stage: str = "synthesize_cluster") -> Model:
@@ -131,7 +132,12 @@ def _chars(messages: list[ModelMessage]) -> int:
 
 
 class LedgerModel(WrapperModel):
-    """Wrap a model so every request reserves budget first and settles on the real usage."""
+    """Wrap a model so every request reserves budget first and settles on the real usage.
+
+    Caps are soft by the input-estimate error: the estimate (characters / 3) can differ from the
+    real token count, so spend may pass a cap by that error. The next reserve is still refused.
+    Streaming is not supported, since it would bypass the ledger.
+    """
 
     def __init__(
         self, wrapped: Model, ledger: Ledger, group: str, tracer: Tracer, max_tokens: int
@@ -141,6 +147,9 @@ class LedgerModel(WrapperModel):
         self.group = group
         self.tracer = tracer
         self.max_tokens = max_tokens
+
+    def request_stream(self, *args: Any, **kwargs: Any) -> Any:
+        raise NotImplementedError("streaming is not supported under a budget ledger")
 
     async def request(
         self,
@@ -190,7 +199,11 @@ async def run_agent[D, T](
     settings = stage_settings(ctx, stage)
     if ledger is not None:
         use_model = LedgerModel(
-            use_model, ledger, group or stage, ctx.tracer, settings.get("max_tokens", 0)
+            use_model,
+            ledger,
+            group or stage,
+            ctx.tracer,
+            settings.get("max_tokens") or DEFAULT_MAX_TOKENS,
         )
     usage = RunUsage()
     start = time.perf_counter()

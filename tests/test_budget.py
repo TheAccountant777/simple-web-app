@@ -117,3 +117,9 @@ def test_charge_credits_over_cap_raises(ledger):
 def test_unknown_group(ledger):
     with pytest.raises(ValueError):
         ledger.reserve("nope", 0.01)
+
+
+def test_charge_credits_refused_when_expired(ledger, clock):
+    clock.t += 300
+    with pytest.raises(BudgetExceeded):
+        ledger.charge_credits("scouts", 1)

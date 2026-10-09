@@ -282,3 +282,34 @@ async def test_ledger_model_settles_zero_on_failure(ctx):
         )  # fmt: skip
     g = ledger.snapshot().groups["planner"]
     assert g.usd_spent == 0 and g.usd_reserved == 0
+
+
+async def test_ledger_model_refuses_streaming(ctx):
+    from kenya_data_engine.llm import LedgerModel
+
+    m = LedgerModel(
+        function_model_returning(Out(answer="x")), _ledger(ctx), "planner", ctx.tracer, 100
+    )
+    with pytest.raises(NotImplementedError, match="streaming"):
+        async with m.request_stream([], None, None):
+            pass
+
+
+async def test_run_agent_defaults_max_tokens_for_reservation(ctx):
+    from kenya_data_engine import llm
+
+    ctx.config.llm.stages["synthesize_cluster"].max_tokens = 0
+    ledger = _ledger(ctx)
+    seen = []
+    real = ledger.reserve
+
+    def spy(group, usd):
+        seen.append(usd)
+        return real(group, usd)
+
+    ledger.reserve = spy
+    await run_agent(
+        Agent(output_type=Out), "hi", ctx, stage="synthesize_cluster", name="t",
+        model=function_model_returning(Out(answer="x")), ledger=ledger, group="planner",
+    )  # fmt: skip
+    assert seen[0] >= ctx.tracer.cost_of(0, llm.DEFAULT_MAX_TOKENS)
