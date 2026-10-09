@@ -77,17 +77,20 @@ def _origin(url: str) -> tuple[str, str, int | None]:
     return (u.scheme, u.host, u.port)  # port is None when default; scheme disambiguates
 
 
-def _check_peer(resp: httpx.Response, client: httpx.AsyncClient, host: str) -> None:
+def _check_peer(resp: httpx.Response, client: httpx.AsyncClient, url: str) -> None:
     """R11 (DNS rebinding): the address actually connected to must be global too.
 
     Skipped when the transport exposes no peer address (mocks) and when the client reaches
     the network through a proxy, where the peer is the proxy and the pre-connect check on
     the resolved name is all there is.
     """
-    if getattr(client, "_mounts", None):  # proxies from the environment are mounts
+    # A mount that differs from the default transport is a proxy (NO_PROXY makes None mounts
+    # that still use the default transport, and those must be checked).
+    if client._transport_for_url(httpx.URL(url)) is not client._transport:
         return
     stream = resp.extensions.get("network_stream")
     info = stream.get_extra_info("server_addr") if stream is not None else None
+    host = httpx.URL(url).host
     if isinstance(info, tuple | list) and info:
         check_addr(host, str(info[0]))
     elif isinstance(info, str):
@@ -118,7 +121,7 @@ async def _get_checked(
         async with client.stream(
             "GET", current, headers=send, timeout=TIMEOUT_S, follow_redirects=False
         ) as resp:
-            _check_peer(resp, client, httpx.URL(current).host)
+            _check_peer(resp, client, current)
             location = resp.headers.get("location")
             if resp.status_code in _REDIRECTS and location:
                 current = str(resp.url.join(location))

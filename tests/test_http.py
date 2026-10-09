@@ -280,3 +280,45 @@ async def test_connected_peer_must_be_global(respx_mock, cache):
         assert ok.content == b"x"
         await fetch("https://mock.ke/x", client=c, cache=cache, ttl_hours=1, policy=_policy())
     assert cache.get("policy:https://rebind.ke/x") is None
+
+
+async def _rebind_raises(client, cache):
+    with pytest.raises(UnsafeUrl, match="non-public"):
+        await fetch(
+            "https://rebind.ke/x", client=client, cache=cache, ttl_hours=1, policy=_policy()
+        )
+
+
+def _rebind_reply(respx_mock):
+    resp = httpx.Response(
+        200, text="x", extensions={"network_stream": _FakeStream(("169.254.169.254", 443))}
+    )
+    respx_mock.get("https://rebind.ke/x").mock(return_value=resp)
+
+
+async def test_peer_check_applies_with_no_proxy_env(respx_mock, cache, monkeypatch):
+    for name in ("NO_PROXY", "no_proxy"):
+        monkeypatch.setenv(name, "rebind.ke")
+    for name in ("HTTPS_PROXY", "https_proxy"):
+        monkeypatch.setenv(name, "http://proxy.invalid:3128")
+    _rebind_reply(respx_mock)
+    async with httpx.AsyncClient(trust_env=True) as c:
+        assert c._mounts  # a None mount for NO_PROXY exists, plus a real proxy mount
+        assert c._transport_for_url(httpx.URL("https://rebind.ke/x")) is c._transport
+        await _rebind_raises(c, cache)
+
+
+async def test_peer_check_applies_with_none_mount(respx_mock, cache):
+    _rebind_reply(respx_mock)
+    async with httpx.AsyncClient(trust_env=False, mounts={"all://other.example": None}) as c:
+        await _rebind_raises(c, cache)
+
+
+async def test_peer_check_skipped_for_proxied_transport(respx_mock, cache):
+    _rebind_reply(respx_mock)
+    proxy = httpx.AsyncHTTPTransport()
+    async with httpx.AsyncClient(trust_env=False, mounts={"all://rebind.ke": proxy}) as c:
+        got = await fetch(
+            "https://rebind.ke/x", client=c, cache=cache, ttl_hours=1, policy=_policy()
+        )
+        assert got.content == b"x"
