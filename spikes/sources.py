@@ -14,7 +14,7 @@ from pathlib import Path
 import feedparser
 import httpx
 import yaml
-from selectolax.parser import HTMLParser
+from selectolax.lexbor import LexborHTMLParser
 
 ROOT = Path(__file__).resolve().parent.parent
 UA = "kenya-data-engine-spike/0.1 (+research)"
@@ -41,7 +41,7 @@ def main() -> None:
         for name, spec in cfg["listings"].items():
             try:
                 r = client.get(spec["url"])
-                tree = HTMLParser(r.text)
+                tree = LexborHTMLParser(r.text)
                 items = tree.css(spec["item"])
                 print(f"[listing] {name}: HTTP {r.status_code}, {len(items)} items "
                       f"for {spec['item']!r}, {spec['url']}")
