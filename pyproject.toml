@@ -48,7 +48,7 @@ include = ["src/kenya_data_engine/defaults/*.yaml", "src/kenya_data_engine/promp
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-extend-exclude = ["docs", "Flask WebAPP", ".superpowers", "spikes"]
+extend-exclude = ["docs", ".superpowers", "spikes"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
@@ -56,7 +56,7 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 [tool.mypy]
 python_version = "3.12"
 plugins = ["pydantic.mypy"]
-exclude = ["Flask WebAPP/", "spikes/", ".superpowers/"]
+exclude = ["spikes/", ".superpowers/"]
 
 [[tool.mypy.overrides]]
 module = "kenya_data_engine.*"
@@ -65,8 +65,6 @@ strict = true
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
-norecursedirs = ["Flask WebAPP", ".superpowers", "spikes"]
+norecursedirs = [".superpowers", "spikes"]
 addopts = "--cov=kenya_data_engine --cov-fail-under=85"
 
-[tool.coverage.run]
-omit = ["Flask WebAPP/*"]
