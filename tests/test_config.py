@@ -146,3 +146,11 @@ def test_unknown_weight_key_rejected(tmp_home):
     with pytest.raises(ConfigError) as ei:
         load_config(tmp_home)
     assert "noveltty" in (ei.value.hint or "")
+
+
+def test_blank_secret_counts_as_missing(tmp_home):
+    tmp_home.env_path.write_text("DEEPSEEK_API_KEY=\nTAVILY_API_KEY=   \nSERPER_API_KEY=abc\n")
+    s = load_secrets(tmp_home)
+    assert s.deepseek_api_key is None
+    assert s.tavily_api_key is None
+    assert s.serper_api_key is not None

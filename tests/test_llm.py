@@ -4,9 +4,10 @@ import pytest
 from conftest import function_model_returning
 from pydantic import BaseModel
 from pydantic_ai import Agent
+from pydantic_ai.exceptions import ModelAPIError, ModelHTTPError, UnexpectedModelBehavior
 from pydantic_ai.models.function import FunctionModel
 
-from kenya_data_engine.errors import BudgetExceeded, ConfigError
+from kenya_data_engine.errors import BudgetExceeded, ConfigError, EngineError
 from kenya_data_engine.llm import build_model, load_prompt, run_agent, stage_settings
 
 
@@ -100,3 +101,78 @@ def test_load_prompt_includes_primer():
 def test_load_prompt_unknown():
     with pytest.raises(ConfigError):
         load_prompt("nope")
+
+
+def _raising(exc):
+    def fn(messages, info):
+        raise exc
+
+    return FunctionModel(fn)
+
+
+@pytest.mark.parametrize(
+    ("exc", "klass", "message", "hint"),
+    [
+        (
+            ModelHTTPError(401, "m"),
+            ConfigError,
+            "DeepSeek rejected the API key",
+            "run `engine init`",
+        ),
+        (
+            ModelHTTPError(403, "m"),
+            ConfigError,
+            "DeepSeek rejected the API key",
+            "run `engine init`",
+        ),
+        (
+            ModelHTTPError(402, "m"),
+            EngineError,
+            "DeepSeek balance exhausted",
+            "top up your DeepSeek account",
+        ),
+        (
+            ModelHTTPError(429, "m"),
+            EngineError,
+            "DeepSeek is rate-limiting or unavailable",
+            "retry in a few minutes",
+        ),
+        (
+            ModelHTTPError(503, "m"),
+            EngineError,
+            "DeepSeek is rate-limiting or unavailable",
+            "retry in a few minutes",
+        ),
+        (
+            ModelAPIError("m", "connection refused"),
+            EngineError,
+            "could not reach DeepSeek",
+            "check your network; run `engine doctor`",
+        ),
+        (
+            UnexpectedModelBehavior("bad output"),
+            EngineError,
+            "DeepSeek returned output that failed validation",
+            "re-run; if it persists, report with `-v`",
+        ),
+    ],
+)
+async def test_run_agent_maps_provider_errors(ctx, exc, klass, message, hint):
+    with pytest.raises(klass) as e:
+        await run_agent(
+            Agent(output_type=Out), "p", ctx, stage="synthesize_cluster", name="n",
+            model=_raising(exc),
+        )  # fmt: skip
+    assert type(e.value) is klass
+    assert e.value.message == message and e.value.hint == hint
+    assert e.value.__cause__ is exc
+    lines = [json.loads(x) for x in ctx.run.trace_path.read_text().splitlines()]
+    assert [x["status"] for x in lines if x["kind"] == "llm"] == ["error"]
+
+
+async def test_run_agent_unmapped_status_passes_through(ctx):
+    with pytest.raises(ModelHTTPError):
+        await run_agent(
+            Agent(output_type=Out), "p", ctx, stage="synthesize_cluster", name="n",
+            model=_raising(ModelHTTPError(404, "m")),
+        )  # fmt: skip

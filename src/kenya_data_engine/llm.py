@@ -5,6 +5,7 @@ from importlib import resources
 from typing import Any
 
 from pydantic_ai import Agent
+from pydantic_ai.exceptions import ModelAPIError, ModelHTTPError, UnexpectedModelBehavior
 from pydantic_ai.models import Model
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
@@ -12,7 +13,7 @@ from pydantic_ai.settings import ModelSettings
 from pydantic_ai.usage import RunUsage
 
 from kenya_data_engine.context import RunContext
-from kenya_data_engine.errors import ConfigError
+from kenya_data_engine.errors import ConfigError, EngineError
 
 _PRIMER_MARKER = "{{primer}}"
 
@@ -48,6 +49,31 @@ def load_prompt(name: str) -> str:
     return text
 
 
+def _friendly(exc: BaseException) -> EngineError | None:
+    """Map a provider failure to a user-facing error, or None to let it propagate."""
+    if isinstance(exc, ModelHTTPError):
+        code = exc.status_code
+        if code in (401, 403):
+            return ConfigError("DeepSeek rejected the API key", hint="run `engine init`")
+        if code == 402:
+            return EngineError("DeepSeek balance exhausted", hint="top up your DeepSeek account")
+        if code == 429 or code >= 500:
+            return EngineError(
+                "DeepSeek is rate-limiting or unavailable", hint="retry in a few minutes"
+            )
+        return None
+    if isinstance(exc, ModelAPIError):
+        return EngineError(
+            "could not reach DeepSeek", hint="check your network; run `engine doctor`"
+        )
+    if isinstance(exc, UnexpectedModelBehavior):
+        return EngineError(
+            "DeepSeek returned output that failed validation",
+            hint="re-run; if it persists, report with `-v`",
+        )
+    return None
+
+
 async def run_agent[T](
     agent: Agent[None, T],
     prompt: str,
@@ -81,6 +107,9 @@ async def run_agent[T](
         result: Any = await agent.run(prompt, model=use_model, model_settings=settings, usage=usage)
     except BaseException as exc:
         record("error", str(exc) or type(exc).__name__)
+        friendly = _friendly(exc)
+        if friendly is not None:
+            raise friendly from exc
         raise
     record("ok")
     output: T = result.output

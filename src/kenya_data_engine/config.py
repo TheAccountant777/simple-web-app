@@ -5,7 +5,7 @@ from importlib import resources
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, Field, SecretStr, ValidationError
+from pydantic import BaseModel, Field, SecretStr, ValidationError, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from kenya_data_engine.errors import ConfigError
@@ -22,6 +22,13 @@ class Secrets(BaseSettings):
     tavily_api_key: SecretStr | None = None
     serper_api_key: SecretStr | None = None
     jina_api_key: SecretStr | None = None
+
+    @field_validator("*", mode="before")
+    @classmethod
+    def _blank_is_missing(cls, value: object) -> object:
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
 
 def load_secrets(home: EngineHome) -> Secrets:
