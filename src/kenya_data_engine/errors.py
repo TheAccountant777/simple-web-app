@@ -24,3 +24,7 @@ class FetchError(EngineError):
 
 class SearchError(EngineError):
     """No search provider could answer."""
+
+
+class ExtractError(EngineError):
+    """A document could not be turned into tables."""
