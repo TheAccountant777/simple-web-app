@@ -1,0 +1,40 @@
+import json
+
+from runs_factory import make_run
+from typer.testing import CliRunner
+
+from kenya_data_engine.cli.app import app
+
+runner = CliRunner()
+
+
+def invoke(home, *args):
+    return runner.invoke(app, ["--home", str(home.root), "report", *args])
+
+
+def test_report_empty_home(tmp_home):
+    r = invoke(tmp_home)
+    assert r.exit_code == 0 and "No runs yet" in r.stdout and "engine run" in r.stdout
+
+
+def test_report_aggregate_and_single(tmp_home):
+    make_run(tmp_home.runs_dir, "2026-10-09-0800")
+    make_run(tmp_home.runs_dir, "2026-10-09-0900", complete=False, kenya_ok=False)
+    r = invoke(tmp_home)
+    assert r.exit_code == 0 and "Stage timings" in r.stdout and "kenya_news" in r.stdout
+    assert "Last 2 runs" in r.stdout
+    one = invoke(tmp_home, "2026-10-09-0900")
+    assert "incomplete" in one.stdout and "timeout" in one.stdout and "LLM" in one.stdout
+    assert one.stdout.index("kenya_news") < one.stdout.index("cbk")  # slowest first
+    assert invoke(tmp_home, "2026-10-09-9999").exit_code == 2
+
+
+def test_report_json_shape(tmp_home):
+    make_run(tmp_home.runs_dir, "2026-10-09-0800")
+    make_run(tmp_home.runs_dir, "2026-10-09-0900")
+    r = invoke(tmp_home, "--json", "--last", "1")
+    data = json.loads(r.stdout)
+    assert set(data) == {"runs", "aggregate"} and len(data["runs"]) == 1
+    assert data["runs"][0]["run_id"] == "2026-10-09-0900"
+    assert data["runs"][0]["llm"]["calls"] == 2
+    assert data["aggregate"]["runs"] == 1
