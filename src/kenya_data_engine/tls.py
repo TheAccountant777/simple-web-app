@@ -26,6 +26,8 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.utils import CryptographyDeprecationWarning
 from cryptography.x509.oid import AuthorityInformationAccessOID
 
+from kenya_data_engine.tools.urlpolicy import check_url
+
 MAX_CERT_BYTES = 256 * 1024
 _NETWORK_TIMEOUT_S = 10.0
 
@@ -124,11 +126,25 @@ def _fetch_leaf_der(host: str, port: int) -> bytes:
     return leaf
 
 
+_REDIRECTS = {301, 302, 303, 307, 308}
+
+
 async def _download(url: str) -> bytes:
-    if urlsplit(url).scheme not in ("http", "https"):
-        raise ValueError(f"unsupported certificate URL {url}")
-    async with httpx.AsyncClient(timeout=_NETWORK_TIMEOUT_S, follow_redirects=True) as client:
-        resp = await client.get(url)
+    """GET a CA Issuers URL. The URL comes from an unverified certificate, so it is SSRF input:
+    it and every redirect hop (at most MAX_HOPS) must pass the URL policy."""
+    async with httpx.AsyncClient(timeout=_NETWORK_TIMEOUT_S, follow_redirects=False) as client:
+        for _ in range(MAX_HOPS + 1):
+            if urlsplit(url).scheme not in ("http", "https"):
+                raise ValueError(f"unsupported certificate URL {url}")
+            await check_url(url)
+            resp = await client.get(url)
+            location = resp.headers.get("location")
+            if resp.status_code in _REDIRECTS and location:
+                url = str(resp.url.join(location))
+                continue
+            break
+        else:
+            raise ValueError(f"too many redirects fetching the issuer certificate (> {MAX_HOPS})")
     resp.raise_for_status()
     if len(resp.content) > MAX_CERT_BYTES:
         raise ValueError("issuer certificate is unreasonably large")

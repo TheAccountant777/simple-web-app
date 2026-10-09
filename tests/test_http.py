@@ -1,3 +1,5 @@
+from datetime import UTC, datetime
+
 import httpx
 import pytest
 import tenacity
@@ -139,7 +141,7 @@ async def test_policy_gzip_body_decodes(respx_mock, cache):
 
 
 async def test_policy_cache_hit_is_checked(cache):
-    cache.put("https://a.ke/x", b"x" * 50, "text/plain", 1)
+    cache.put("policy:https://a.ke/x", b"x" * 50, "text/plain", 1, "https://a.ke/x")
     async with httpx.AsyncClient() as c:
         r = await fetch("https://a.ke/x", client=c, cache=cache, ttl_hours=1, policy=_policy())
         assert r.from_cache
@@ -147,7 +149,7 @@ async def test_policy_cache_hit_is_checked(cache):
             await fetch(
                 "https://a.ke/x", client=c, cache=cache, ttl_hours=1, policy=_policy(max_bytes=10)
             )
-    cache.put("http://127.0.0.1/x", b"secret", "text/plain", 1)
+    cache.put("policy:http://127.0.0.1/x", b"secret", "text/plain", 1, "http://127.0.0.1/x")
     async with httpx.AsyncClient() as c:
         with pytest.raises(UnsafeUrl):
             await fetch("http://127.0.0.1/x", client=c, cache=cache, ttl_hours=1, policy=_policy())
@@ -204,3 +206,77 @@ async def test_policy_chain_error_uses_aia_client(respx_mock, cache):
             policy=_policy(),
         )
     assert r.content == b"ok" and used == ["https://a.ke/x"]
+
+
+async def test_legacy_cache_entry_is_not_served_to_a_policy_fetch(respx_mock, cache):
+    cache.put("https://a.ke/x", b"unchecked legacy bytes", "text/plain", 1)  # no policy applied
+    route = respx_mock.get("https://a.ke/x").respond(200, text="fresh")
+    async with httpx.AsyncClient() as c:
+        r = await fetch("https://a.ke/x", client=c, cache=cache, ttl_hours=1, policy=_policy())
+        assert not r.from_cache and r.content == b"fresh" and route.call_count == 1
+        plain = await fetch("https://a.ke/x", client=c, cache=cache, ttl_hours=1)
+    assert plain.content == b"unchecked legacy bytes"  # the plain namespace is untouched
+
+
+async def test_policy_cache_hit_returns_final_url_and_fetch_time(respx_mock, cache):
+    respx_mock.get("https://a.ke/x").respond(302, headers={"location": "https://a.ke/final"})
+    respx_mock.get("https://a.ke/final").respond(200, text="ok")
+    async with httpx.AsyncClient() as c:
+        first = await fetch("https://a.ke/x", client=c, cache=cache, ttl_hours=1, policy=_policy())
+        again = await fetch("https://a.ke/x", client=c, cache=cache, ttl_hours=1, policy=_policy())
+    assert first.url == again.url == "https://a.ke/final"
+    assert again.from_cache and again.fetched_at <= datetime.now(UTC)
+    assert cache.get("policy:https://a.ke/x").final_url == "https://a.ke/final"
+
+
+async def test_cache_key_includes_accept_header(respx_mock, cache):
+    route = respx_mock.get("https://a.ke/x").respond(200, text="hi")
+    async with httpx.AsyncClient() as c:
+        await fetch("https://a.ke/x", client=c, cache=cache, ttl_hours=1, headers={"Accept": "a/b"})
+        again = await fetch(
+            "https://a.ke/x", client=c, cache=cache, ttl_hours=1, headers={"accept": "a/b"}
+        )
+        other = await fetch(
+            "https://a.ke/x", client=c, cache=cache, ttl_hours=1, headers={"Accept": "c/d"}
+        )
+    assert again.from_cache and not other.from_cache and route.call_count == 2
+
+
+def test_cache_migrates_an_old_schema_idempotently(tmp_path):
+    import sqlite3
+
+    db = tmp_path / "old.db"
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "CREATE TABLE cache (key TEXT PRIMARY KEY, content BLOB, content_type TEXT, "
+            "fetched_at TEXT, expires_at TEXT)"
+        )
+    Cache(db)
+    c = Cache(db)  # second open must not fail on the existing column
+    c.put("k", b"v", "t", 1, "https://f/")
+    entry = c.get("k")
+    assert entry is not None and entry.final_url == "https://f/"
+
+
+class _FakeStream:
+    def __init__(self, addr):
+        self.addr = addr
+
+    def get_extra_info(self, name):
+        return self.addr if name == "server_addr" else None
+
+
+async def test_connected_peer_must_be_global(respx_mock, cache):
+    def reply(addr):
+        return httpx.Response(200, text="x", extensions={"network_stream": _FakeStream(addr)})
+
+    respx_mock.get("https://rebind.ke/x").mock(return_value=reply(("169.254.169.254", 443)))
+    respx_mock.get("https://ok.ke/x").mock(return_value=reply(("93.184.216.34", 443)))
+    respx_mock.get("https://mock.ke/x").respond(200, text="no peer info: pre-connect check only")
+    async with httpx.AsyncClient(trust_env=False) as c:
+        with pytest.raises(UnsafeUrl, match="non-public"):
+            await fetch("https://rebind.ke/x", client=c, cache=cache, ttl_hours=1, policy=_policy())
+        ok = await fetch("https://ok.ke/x", client=c, cache=cache, ttl_hours=1, policy=_policy())
+        assert ok.content == b"x"
+        await fetch("https://mock.ke/x", client=c, cache=cache, ttl_hours=1, policy=_policy())
+    assert cache.get("policy:https://rebind.ke/x") is None

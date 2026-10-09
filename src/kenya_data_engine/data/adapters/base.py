@@ -1,7 +1,7 @@
 """Adapter contract plus the policy-checked fetch every adapter shares."""
 
 from contextvars import ContextVar
-from datetime import date
+from datetime import date, datetime
 from typing import TYPE_CHECKING, Literal, Protocol
 
 from pydantic import BaseModel
@@ -10,13 +10,10 @@ from kenya_data_engine.context import RunContext
 from kenya_data_engine.data.models import CheckReport, Observation
 from kenya_data_engine.data.store import AddResult
 from kenya_data_engine.http import FetchPolicy, FetchResult, fetch
-from kenya_data_engine.tools.urlpolicy import Resolver
 
 if TYPE_CHECKING:
     from kenya_data_engine.data.registry import CatalogEntry
 
-# Tests inject a fake DNS here so check_url never touches the network.
-DNS_RESOLVER: Resolver | None = None
 # The probe sets a list here to learn the final URL of every page an adapter fetched.
 FETCH_LOG: ContextVar[list[str] | None] = ContextVar("fetch_log", default=None)
 
@@ -25,6 +22,10 @@ class Discovered(BaseModel):
     url: str
     title: str | None = None
     published: date | None = None
+    # Set by fetch_series once the item is fetched, for provenance: where the redirects ended
+    # and when the bytes were fetched (the cache entry's time on a hit).
+    final_url: str | None = None
+    retrieved_at: datetime | None = None
 
 
 class FetchOutcome(BaseModel):
@@ -57,7 +58,7 @@ def fetch_policy(ctx: RunContext, kind: Literal["page", "item"]) -> FetchPolicy:
     return FetchPolicy(
         max_bytes=caps["html"] if kind == "page" else max(caps["pdf"], caps["sheet"]),
         max_redirects=ctx.config.data.max_redirects,
-        resolve=DNS_RESOLVER,
+        resolve=ctx.resolver,
     )
 
 

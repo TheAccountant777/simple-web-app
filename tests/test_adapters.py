@@ -291,3 +291,15 @@ async def test_compound_series_unit_survives_currency_cells(ctx, respx_mock, tmp
     body = _table("<tr><td>Nairobi</td><td>Sh180.5</td><td>170</td></tr>")
     out = await _listing_run(ctx, respx_mock, tmp_home, body, unit="KES/L")
     assert out.report and out.report.status == "accepted"
+
+
+async def test_provenance_url_is_final_url_and_time_is_fetch_time(ctx, respx_mock):
+    moved = "https://api.worldbank.org/moved/v2"
+    respx_mock.get(WB_URL).respond(302, headers={"location": moved})
+    respx_mock.get(moved).respond(json=[{"page": 1}, WB_ROWS])
+    await fetch_series("wb:FP.CPI.TOTL.ZG", ctx)
+    first = SeriesStore(ctx.home.db_path).latest("wb:FP.CPI.TOTL.ZG")[0].provenance
+    assert first.url == moved
+    await fetch_series("wb:FP.CPI.TOTL.ZG", ctx)  # cache hit: same final URL, original time
+    again = SeriesStore(ctx.home.db_path).latest("wb:FP.CPI.TOTL.ZG")[0].provenance
+    assert again.url == first.url and again.retrieved_at == first.retrieved_at

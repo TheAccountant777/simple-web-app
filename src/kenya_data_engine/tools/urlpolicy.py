@@ -69,12 +69,17 @@ async def check_url(url: str, resolve: Resolver | None = None) -> None:
     if not addrs:
         raise UnsafeUrl(f"cannot resolve {host}")
     for addr in addrs:
-        try:
-            ip = ipaddress.ip_address(addr.split("%")[0])
-        except ValueError as exc:
-            raise UnsafeUrl(f"{host} resolved to a non-IP address {addr!r}") from exc
-        if not _is_global(ip):
-            raise UnsafeUrl(f"{host} resolves to non-public address {ip}")
+        check_addr(host, addr)
+
+
+def check_addr(host: str, addr: str) -> None:
+    """Raise UnsafeUrl unless `addr` is a global IP. Used on resolved and on connected addresses."""
+    try:
+        ip = ipaddress.ip_address(addr.split("%")[0])
+    except ValueError as exc:
+        raise UnsafeUrl(f"{host} resolved to a non-IP address {addr!r}") from exc
+    if not _is_global(ip):
+        raise UnsafeUrl(f"{host} resolves to non-public address {ip}")
 
 
 def sniff(content: bytes) -> Sniffed:

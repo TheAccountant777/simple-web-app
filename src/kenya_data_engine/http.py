@@ -7,7 +7,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 import httpx
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from tenacity import (
     AsyncRetrying,
     retry_if_exception_type,
@@ -21,7 +21,7 @@ from kenya_data_engine.cache import Cache
 from kenya_data_engine.errors import FetchError
 from kenya_data_engine.models import normalize_url
 from kenya_data_engine.tls import AiaFixer, is_incomplete_chain
-from kenya_data_engine.tools.urlpolicy import Resolver, check_url
+from kenya_data_engine.tools.urlpolicy import Resolver, UnsafeUrl, check_addr, check_url
 from kenya_data_engine.trace import TraceEvent, Tracer
 
 TIMEOUT_S = 20.0
@@ -45,6 +45,8 @@ class FetchResult(BaseModel):
     content: bytes
     content_type: str
     from_cache: bool
+    # When the bytes were fetched: the cache entry's time on a hit, else now.
+    fetched_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class FetchPolicy(BaseModel):
@@ -75,6 +77,32 @@ def _origin(url: str) -> tuple[str, str, int | None]:
     return (u.scheme, u.host, u.port)  # port is None when default; scheme disambiguates
 
 
+def _check_peer(resp: httpx.Response, client: httpx.AsyncClient, host: str) -> None:
+    """R11 (DNS rebinding): the address actually connected to must be global too.
+
+    Skipped when the transport exposes no peer address (mocks) and when the client reaches
+    the network through a proxy, where the peer is the proxy and the pre-connect check on
+    the resolved name is all there is.
+    """
+    if getattr(client, "_mounts", None):  # proxies from the environment are mounts
+        return
+    stream = resp.extensions.get("network_stream")
+    info = stream.get_extra_info("server_addr") if stream is not None else None
+    if isinstance(info, tuple | list) and info:
+        check_addr(host, str(info[0]))
+    elif isinstance(info, str):
+        raise UnsafeUrl(f"{host} connected to a non-IP peer {info!r}")
+
+
+def cache_key(url: str, headers: dict[str, str] | None, *, policy: bool) -> str:
+    """Policy fetches get their own namespace; a given Accept header is part of the key."""
+    key = normalize_url(url)
+    accept = next((v for k, v in (headers or {}).items() if k.lower() == "accept"), None)
+    if accept:
+        key += f"\naccept:{accept}"
+    return f"policy:{key}" if policy else key
+
+
 async def _get_checked(
     client: httpx.AsyncClient, url: str, headers: dict[str, str], policy: FetchPolicy
 ) -> httpx.Response:
@@ -90,6 +118,7 @@ async def _get_checked(
         async with client.stream(
             "GET", current, headers=send, timeout=TIMEOUT_S, follow_redirects=False
         ) as resp:
+            _check_peer(resp, client, httpx.URL(current).host)
             location = resp.headers.get("location")
             if resp.status_code in _REDIRECTS and location:
                 current = str(resp.url.join(location))
@@ -208,18 +237,27 @@ async def _fetch(
     info: dict[str, Any],
     policy: FetchPolicy | None = None,
 ) -> FetchResult:
-    key = normalize_url(url)
+    key = cache_key(url, headers, policy=policy is not None)
     hit = cache.get(key)
     if hit is not None:
+        shown = url
         if policy is not None:
             await check_url(url, policy.resolve)
+            if hit.final_url and hit.final_url != url:
+                shown = hit.final_url
+                await check_url(shown, policy.resolve)
             if len(hit.content) > policy.max_bytes:
                 raise FetchError(
                     f"cached response too large for {url} (> {policy.max_bytes} bytes)"
                 )
         info.update(status=200, from_cache=True, bytes=len(hit.content))
         return FetchResult(
-            url=url, status=200, content=hit.content, content_type=hit.content_type, from_cache=True
+            url=shown,
+            status=200,
+            content=hit.content,
+            content_type=hit.content_type,
+            from_cache=True,
+            fetched_at=hit.fetched_at,
         )
     send = {**DEFAULT_HEADERS, **(headers or {})}
     try:
@@ -246,8 +284,8 @@ async def _fetch(
     if not resp.is_success:
         raise FetchError(f"{resp.status_code} for {url}")
     ctype = resp.headers.get("content-type", "")
-    cache.put(key, resp.content, ctype, ttl_hours)
     final = str(resp.url) if policy is not None else url
+    cache.put(key, resp.content, ctype, ttl_hours, final if policy is not None else None)
     return FetchResult(
         url=final,
         status=resp.status_code,

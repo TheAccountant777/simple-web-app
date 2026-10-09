@@ -13,6 +13,7 @@ from kenya_data_engine.config import EngineConfig, Secrets, load_config, load_se
 from kenya_data_engine.home import EngineHome
 from kenya_data_engine.runs import RunHandle
 from kenya_data_engine.tls import AiaFixer
+from kenya_data_engine.tools.urlpolicy import Resolver
 from kenya_data_engine.trace import Tracer
 
 
@@ -37,6 +38,7 @@ class RunContext:
     http: httpx.AsyncClient
     tls: AiaFixer
     emit: Callable[[StageEvent], None] = field(default=_no_emit)
+    resolver: Resolver | None = None  # DNS seam for URL-policy checks; tests inject a fake
 
 
 @asynccontextmanager

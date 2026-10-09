@@ -173,9 +173,9 @@ class ListingAdapter:
                         value=parsed.value,
                         unit=_cell_unit(spec.unit, parsed.unit),
                         provenance=Provenance(
-                            url=item.url,
+                            url=item.final_url or item.url,
                             blob_sha256=sha,
-                            retrieved_at=now,
+                            retrieved_at=item.retrieved_at or now,
                             published=item.published,
                             locator=loc,
                             extractor=table.extractor,

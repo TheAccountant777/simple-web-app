@@ -378,3 +378,54 @@ def test_trusted_roots_load_without_warnings(recwarn):
     _REAL_TRUSTED_ROOTS.cache_clear()
     _REAL_TRUSTED_ROOTS()
     assert not [w for w in recwarn if "serial number" in str(w.message)]
+
+
+async def _fake_dns(host: str) -> list[str]:
+    return ["93.184.216.34"]
+
+
+@pytest.fixture
+def fake_dns(monkeypatch):
+    from kenya_data_engine.tools.urlpolicy import check_url as real
+
+    monkeypatch.setattr(tls, "check_url", lambda url, resolve=None: real(url, _fake_dns))
+
+
+async def test_download_refuses_metadata_address_as_issuer_url():
+    from kenya_data_engine.tools.urlpolicy import UnsafeUrl
+
+    with pytest.raises(UnsafeUrl, match="non-public"):
+        await tls._download("http://169.254.169.254/latest/meta-data/ca.crt")
+
+
+async def test_download_refuses_unsafe_redirect_hop(respx_mock, fake_dns):
+    from kenya_data_engine.tools.urlpolicy import UnsafeUrl
+
+    respx_mock.get("http://ca.example/i.crt").respond(
+        302, headers={"location": "http://169.254.169.254/x"}
+    )
+    metadata = respx_mock.get("http://169.254.169.254/x").respond(200, content=b"x")
+    with pytest.raises(UnsafeUrl):
+        await tls._download("http://ca.example/i.crt")
+    assert not metadata.called
+
+
+async def test_download_follows_safe_redirects_up_to_three(respx_mock, fake_dns):
+    for n in range(3):
+        respx_mock.get(f"http://ca.example/{n}").respond(
+            302, headers={"location": f"http://ca.example/{n + 1}"}
+        )
+    respx_mock.get("http://ca.example/3").respond(200, content=b"cert")
+    assert await tls._download("http://ca.example/0") == b"cert"
+    respx_mock.get("http://ca.example/3").respond(302, headers={"location": "/4"})
+    with pytest.raises(ValueError, match="too many redirects"):
+        await tls._download("http://ca.example/0")
+
+
+async def test_fixer_never_downloads_from_link_local_issuer(tmp_path, monkeypatch):
+    key = ec.generate_private_key(ec.SECP256R1())
+    bad_leaf = make_cert("site.ke", "Mid", key, key, ca=False, aia="http://169.254.169.254/ca")
+    monkeypatch.setattr(tls, "_fetch_leaf_der", lambda h, p: der(bad_leaf))
+    with pytest.raises(ValueError, match="could not download"):
+        await AiaFixer(tmp_path / "certs").client_for("https://www.site.ke/")
+    assert not list((tmp_path / "certs").glob("*.pem"))

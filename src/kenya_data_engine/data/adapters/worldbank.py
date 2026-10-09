@@ -66,9 +66,9 @@ class WorldBankAdapter:
                     value=Decimal(str(value)),
                     unit=spec.unit,
                     provenance=Provenance(
-                        url=item.url,
+                        url=item.final_url or item.url,
                         blob_sha256=sha,
-                        retrieved_at=now,
+                        retrieved_at=item.retrieved_at or now,
                         locator=f"api:/v2/country/KEN/indicator/{indicator}#{date_text}",
                         extractor="worldbank-api@v2",
                     ),

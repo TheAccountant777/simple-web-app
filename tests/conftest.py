@@ -26,7 +26,7 @@ async def _open(tmp_home):
 
 
 @pytest_asyncio.fixture
-async def ctx(tmp_home, monkeypatch):
+async def ctx(tmp_home, monkeypatch, data_net):
     """Context with fake API keys for every provider."""
     for key in ("DEEPSEEK", "TAVILY", "SERPER", "JINA"):
         monkeypatch.setenv(f"{key}_API_KEY", f"fake-{key.lower()}")
@@ -35,7 +35,7 @@ async def ctx(tmp_home, monkeypatch):
 
 
 @pytest_asyncio.fixture
-async def ctx_no_keys(tmp_home):
+async def ctx_no_keys(tmp_home, data_net):
     async for c in _open(tmp_home):
         yield c
 
@@ -88,5 +88,13 @@ def data_net(monkeypatch):
     async def resolve(host: str) -> list[str]:
         return ["93.184.216.34"]
 
-    monkeypatch.setattr("kenya_data_engine.data.adapters.base.DNS_RESOLVER", resolve)
+    import kenya_data_engine.context as context
+
+    real = context.RunContext
+
+    def with_resolver(**kw):
+        return real(**{"resolver": resolve, **kw})
+
+    # Every context opened from here on (CLI included) carries the fake resolver.
+    monkeypatch.setattr(context, "RunContext", with_resolver)
     monkeypatch.setattr("kenya_data_engine.http._WAIT", tenacity.wait_none())

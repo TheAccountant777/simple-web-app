@@ -150,6 +150,7 @@ async def fetch_series(key: str, ctx: RunContext, *, limit: int = 12) -> FetchOu
             res = await policy_fetch(item.url, ctx, "item", getattr(adapter, "headers", None))
             sha = blobs.put(res.content)
             fetched += 1
+            item = item.model_copy(update={"final_url": res.url, "retrieved_at": res.fetched_at})
             obs, rejects = await _extract(adapter, entry, item, res.content, sha, ctx)
             if not obs and not rejects:
                 raise EngineError("no observations extracted")
