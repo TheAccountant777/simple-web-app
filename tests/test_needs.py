@@ -1,4 +1,5 @@
 import io
+import uuid
 from datetime import UTC, date, datetime
 from decimal import Decimal
 
@@ -204,7 +205,7 @@ def test_need_status_fact_by_tier(ctx, tmp_path, urls, expected):
 
 
 def _status_for(ctx, tmp_path, obs, **need_kw):
-    store = SeriesStore(tmp_path / "s2.db")
+    store = SeriesStore(tmp_path / f"{uuid.uuid4().hex}.db")
     store.add(obs)
     deps = make_deps(ctx, tmp_path)
     spec = DataSourceSpec(need="n1", via="file", publisher="p", why="w", url="u")
@@ -247,3 +248,15 @@ async def test_missing_entity_column_is_noted(ctx, respx_mock, tmp_path):
     one = need.model_copy(update={"entities": ["Nairobi"]})
     res = await execute(spec, one, deps)
     assert not res.notes and need_status(one, [res], store, deps.book, 1).status == "satisfied"
+
+
+def test_frequency_none_takes_the_larger_of_periods_and_entities(ctx, tmp_path):
+    towns = ["A", "B", "C", "D", "E"]
+    months = [_obs("s", "A", month(2026, m)) for m in range(1, 13)]
+    s = _status_for(ctx, tmp_path, months, entities=["A"], frequency="none", min_points=12)
+    assert s.points == 12 and s.status == "satisfied"
+    one_month = [_obs("s", t, month(2026, 9)) for t in towns]
+    s = _status_for(ctx, tmp_path, one_month, entities=towns, frequency="none", min_points=5)
+    assert s.points == 5
+    s = _status_for(ctx, tmp_path, one_month, entities=towns, frequency="monthly", min_points=5)
+    assert s.points == 1 and s.status == "partial"

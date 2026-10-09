@@ -84,9 +84,13 @@ def build_scout(need: DataNeed) -> Agent[ResearchDeps, ScoutOutput]:
 
 
 def vet_specs(
-    specs: list[DataSourceSpec], need: DataNeed, deps: ResearchDeps
+    specs: list[DataSourceSpec], need: DataNeed, deps: ResearchDeps, *, from_memory: bool = False
 ) -> tuple[list[DataSourceSpec], list[str]]:
-    """Keep specs for this need whose sources a tool actually returned (Review Focus 2)."""
+    """Keep specs for this need whose sources a tool actually returned (Review Focus 2).
+
+    Memory specs carry their own urls (they were verified before), so only the url's presence
+    is required for them.
+    """
     kept: list[DataSourceSpec] = []
     rejected: list[str] = []
     for spec in specs:
@@ -99,7 +103,7 @@ def vet_specs(
             if entry is None or not entry.enabled:
                 rejected.append(f"rejected: unknown registry key {spec.registry_key!r}")
                 continue
-        elif not spec.url or not url_allowed(deps, spec.url):
+        elif not spec.url or not (from_memory or url_allowed(deps, spec.url)):
             shown = deps.ctx.tracer.redact(spec.url or "(none)")
             rejected.append(f"rejected: invented url {shown}")
             continue
@@ -123,13 +127,13 @@ async def scout(
     remembered = [
         s.model_copy(update={"need": need.id}) for s in deps.memory.lookup(need, today_nairobi())
     ]
-    for spec in remembered:  # these urls are the memory's own: the allowlist knows them
-        if spec.url:
-            deps.memory_urls.update((spec.url, normalize_url(spec.url)))
     stale: list[str] = []
     if remembered:
-        # a remembered spec can have gone stale: its registry key disabled, its url unusable
-        remembered, stale = vet_specs(remembered, need, deps)
+        # a remembered spec can have gone stale: its registry key disabled, its url missing
+        remembered, stale = vet_specs(remembered, need, deps, from_memory=True)
+        for spec in remembered:  # only vetted specs make their urls fetchable
+            if spec.url:
+                deps.memory_urls.update((spec.url, normalize_url(spec.url)))
         if remembered:
             return ScoutResult(need_id=need.id, specs=remembered, rejected=stale, memory_hit=True)
     agent = build_scout(need)

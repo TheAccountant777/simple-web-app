@@ -67,18 +67,20 @@ def _in_range(o: StoredObservation, need: DataNeed) -> bool:
 
 
 def _count(store: SeriesStore, keys: list[str], need: DataNeed) -> int:
-    """Points in the need's period range for its entities (R8).
+    """Points in the need's period range for its entities (R8, R11).
 
-    Time series (frequency set): distinct periods. Frequency "none" (a ranking or snapshot):
-    distinct entities.
+    Time series (frequency set): distinct periods. Frequency "none" (a ranking, a snapshot, or
+    a series the Planner left unspecified): the larger of distinct periods and distinct entities.
     """
     wanted = {e.strip().lower() for e in need.entities}
-    seen: set[str] = set()
+    periods: set[str] = set()
+    entities: set[str] = set()
     for key in dict.fromkeys(keys):
         for o in store.latest(key):
             if (not wanted or o.entity.strip().lower() in wanted) and _in_range(o, need):
-                seen.add(o.entity.strip().lower() if need.frequency == "none" else o.period.label)
-    return len(seen)
+                periods.add(o.period.label)
+                entities.add(o.entity.strip().lower())
+    return max(len(periods), len(entities)) if need.frequency == "none" else len(periods)
 
 
 # --- generic table extraction -----------------------------------------------------------------

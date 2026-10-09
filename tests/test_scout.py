@@ -112,3 +112,17 @@ async def test_memory_specs_are_vetted_and_fall_through(ctx, tmp_path):
     res = await scout(_need(), deps, model=model)
     assert calls == [1] and res.memory_hit and res.specs == [good]
     assert len(res.rejected) == 1
+
+
+async def test_rejected_memory_urls_do_not_become_fetchable(ctx, tmp_path):
+    from kenya_data_engine.research.tools import url_allowed
+
+    other = _spec("https://www.knbs.or.ke/other.xlsx", need="n7")
+    dead = DataSourceSpec(
+        need="n1", via="registry", registry_key="imf:cpi", url=INVENTED, publisher="p", why="w"
+    )
+    model, _ = _counting_model({"specs": []})
+    deps = make_deps(ctx, tmp_path, memory=FakeMemory([dead, other]))
+    res = await scout(_need(), deps, model=model)
+    assert res.memory_hit and [s.url for s in res.specs] == [other.url]
+    assert url_allowed(deps, other.url) and not url_allowed(deps, INVENTED)
