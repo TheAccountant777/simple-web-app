@@ -13,6 +13,8 @@
   `run_test()` pilots.
 
 ## Rules
+- Subagents: **Sonnet or Haiku only** (Haiku for small re-reviews and mechanical fixes, Sonnet for
+  implementation and reviews). Never Opus subagents — the user's explicit rule, to save usage.
 - No number from an LLM: code computes every figure. Claims must be quote-grounded
   (`tools/grounding.py`, exact match).
 - Never weaken TLS verification (`tls.py` AIA repair is security-reviewed).
