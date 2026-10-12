@@ -67,7 +67,7 @@ Other ways to start one:
 engine research "Central Bank of Kenya base rate decision"
 engine research 2 --plan-only            # just the Planner's brief, very cheap
 engine research 3 --budget lean
-engine research --resume <run-id> 1      # continue a run that stopped
+engine research --resume <run-id>        # continue a run that stopped
 ```
 
 **Good:**
