@@ -27,6 +27,7 @@ from kenya_data_engine.research.budget import LedgerSnapshot
 from kenya_data_engine.research.dossier import write_dossier
 from kenya_data_engine.research.models import Claim, NeedStatus
 from kenya_data_engine.research.orchestrator import (
+    SEARCH_FAILED_GAP,
     ResearchOutcome,
     load_book,
     load_topic,
@@ -218,8 +219,9 @@ def outcome_panel(outcome: ResearchOutcome) -> Panel:
         f"searches · {sc.seconds:.0f}s",
     )
     grid.add_row("stopped", Text(sc.stopped_because or "-"))
-    for gap in outcome.gaps[:3]:
-        grid.add_row("gap", Text(gap))
+    loud = [g for g in outcome.gaps if g == SEARCH_FAILED_GAP]
+    for gap in (loud + [g for g in outcome.gaps if g not in loud])[:3]:
+        grid.add_row("gap", Text(gap, style="fail" if gap == SEARCH_FAILED_GAP else ""))
     if outcome.challenge_note:
         grid.add_row("challenge", Text(outcome.challenge_note))
     grid.add_row("run", Text(outcome.run_id, style="accent"))
@@ -304,8 +306,20 @@ def research_cmd(
         store = RunStore(state.home.runs_dir)
         if resume:
             handle = store.open(resume)
-            topic_in = resolve_topic(topic, store) if topic else load_topic(handle)
-            if topic_in is None:
+            saved_topic = load_topic(handle)
+            if saved_topic is not None:
+                topic_in = saved_topic
+                if topic and resolve_topic(topic, store).title != saved_topic.title:
+                    err_console.print(
+                        Text(
+                            f"warning: run {resume} was started on {saved_topic.title!r}; "
+                            "ignoring the TOPIC given and keeping that one",
+                            style="warn",
+                        )
+                    )
+            elif topic:
+                topic_in = resolve_topic(topic, store)
+            else:
                 raise ConfigError(
                     f"run {resume} has no saved research topic", hint="give the TOPIC again"
                 )

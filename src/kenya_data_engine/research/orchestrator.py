@@ -55,6 +55,7 @@ from kenya_data_engine.tools.search import build_search
 
 EventFn = Callable[[str, Any], None]
 
+SEARCH_FAILED_GAP = "search provider failed — check your Tavily/Serper key with `engine doctor`"
 STEPS = ("plan", "rounds", "figures", "claims", "verify", "challenge")
 _LATE = (Phase.WRAP_UP, Phase.EXPIRED)
 _EXHAUSTED_USD = 0.001  # a scouts group with less than this left cannot pay for another call
@@ -155,6 +156,7 @@ class _Research:
         self.memory = SourceMemory(ctx.home.db_path)
         self.store = SeriesStore(ctx.home.db_path)
         self.log: list[str] = []
+        self.search_stats: dict[str, int] = {"attempts": 0, "failures": 0}
         self.memory_urls: set[str] = set()
         self.raw_urls: dict[str, str] = {}
         self.fresh = not resume  # True once a step has run for real
@@ -177,6 +179,7 @@ class _Research:
             log=self.log,
             memory_urls=self.memory_urls,
             raw_urls=self.raw_urls,
+            stats=self.search_stats,
         )
 
     def step(self, name: str, status: str, detail: str = "") -> None:
@@ -408,6 +411,13 @@ class _Research:
             self.step("claims", "stopped", exc.message)
             state.gaps.append(f"claim writer stopped: {exc.message}")
             return []
+        except Exception as exc:  # the dossier is still worth writing without claims
+            why = self.ctx.tracer.redact(
+                getattr(exc, "message", None) or str(exc) or type(exc).__name__
+            )
+            self.step("claims", "stopped", f"failed: {why}")
+            state.gaps.append(f"claim writer failed: {why}")
+            return []
         self.save("claims", ClaimsOutput(claims=cands))
         self.step("claims", "done", f"{len(cands)} candidate claims")
         return cands
@@ -529,6 +539,10 @@ class _Research:
             verdict, reasons = recheck_verdict(brief, claims, state.statuses)
         else:  # nothing was researched: the planner's verdict stands
             verdict, reasons = brief.verdict, list(brief.verdict_reasons)
+        attempts, failures = self.search_stats["attempts"], self.search_stats["failures"]
+        spent = self.ledger.snapshot().credits_spent
+        if attempts and (failures >= attempts or (failures and spent == 0)):
+            state.gaps.append(SEARCH_FAILED_GAP)
         for k in conflicts:
             if k.resolution == "unresolved":
                 state.gaps.append(

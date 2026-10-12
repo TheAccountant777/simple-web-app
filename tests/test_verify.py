@@ -121,6 +121,20 @@ def test_speculation_and_unknown_figure(ctx, tmp_path):
     assert spec.status == "speculation" and fig.status == "refused"
 
 
+def test_speculation_with_a_number_is_refused(ctx, tmp_path):
+    deps = _book(ctx, tmp_path)
+    (a, b) = _static(
+        ctx,
+        deps,
+        [
+            _cand(quote=None, evidence=None, text_template="VAT will rise to 18%."),
+            _cand(quote=None, evidence=None, text_template="Prices will rise by three times."),
+        ],
+    )
+    for c in (a, b):
+        assert c.status == "refused" and "number without quote or figure" in c.reasons
+
+
 LEGAL_Q = "Value Added Tax on fuel is 16 per cent"
 
 

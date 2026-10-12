@@ -165,6 +165,39 @@ def test_research_resume_reads_topic_from_checkpoint(cli, seams, respx_mock, tmp
     assert len(list(tmp_home.briefs_dir.rglob("README.md"))) == 2
 
 
+def test_research_resume_with_other_topic_warns_and_keeps_saved(cli, seams, respx_mock, tmp_home):
+    respx_mock.get(WB_URL).respond(json=WB_BODY)
+    assert cli.invoke(app, ["research", "Kenya inflation"]).exit_code == 0
+    run_id = RunStore(tmp_home.runs_dir).list()[0]
+    r = cli.invoke(app, ["research", "--resume", run_id, "Something else entirely"])
+    assert r.exit_code == 0, r.output
+    assert "warning" in r.output and "Kenya inflation" in r.output
+    assert "Researching: Kenya inflation" in r.stdout
+
+
+def test_outcome_panel_shows_search_failure_gap_first():
+    from types import SimpleNamespace
+
+    from kenya_data_engine.cli.research import outcome_panel
+    from kenya_data_engine.research.orchestrator import SEARCH_FAILED_GAP
+
+    sc = SimpleNamespace(
+        facts=0, inferences=0, refused=0, speculation=0, needs_satisfied=0, needs_total=0,
+        credits_spent=0, credits_cap=0, usd_spent=0.0, usd_cap=0.0, seconds=0.0,
+        stopped_because="",
+    )  # fmt: skip
+    out = SimpleNamespace(
+        verdict="supported", verdict_reasons=[], scorecard=sc, challenge_note=None, run_id="r",
+        gaps=["a", "b", "c", SEARCH_FAILED_GAP],
+    )  # fmt: skip
+
+    from kenya_data_engine.cli.ui import console
+
+    with console.capture() as cap:
+        console.print(outcome_panel(out))  # type: ignore[arg-type]
+    assert "search provider failed" in cap.get()
+
+
 def test_research_errors_exit_1(cli, monkeypatch, tmp_home):
     r = cli.invoke(app, ["research"])
     assert r.exit_code == 1 and "give a TOPIC" in r.output

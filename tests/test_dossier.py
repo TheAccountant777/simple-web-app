@@ -2,10 +2,14 @@ import csv
 import json
 from datetime import date
 
+import pytest
 from test_orchestrator import TOPIC, WB_BODY, WB_URL, brief_dict, models
 
+from kenya_data_engine.errors import EngineError
+from kenya_data_engine.research import dossier as dossier_mod
 from kenya_data_engine.research.dossier import (
     DossierDoc,
+    _claim_dir,
     dossier_dir,
     slugify,
     write_dossier,
@@ -179,3 +183,20 @@ async def test_dossier_json_fields_are_redacted(ctx):
     raw = (root / "dossier.json").read_text()
     doc = json.loads(raw)
     assert "fake-deepseek" not in raw and "***" in doc["gaps"][0]
+
+
+def test_dossier_dir_counts_files_and_claim_dir_is_bounded(tmp_path):
+    day = tmp_path / "2026-10-09"
+    day.mkdir()
+    (day / "01-fuel").write_text("a plain file")
+    assert dossier_dir(tmp_path, TODAY, "fuel") == day / "02-fuel"
+    assert _claim_dir(tmp_path, TODAY, "fuel") == day / "02-fuel"
+
+
+def test_claim_dir_gives_up_instead_of_spinning(tmp_path, monkeypatch):
+    day = tmp_path / "2026-10-09"
+    day.mkdir()
+    (day / "01-fuel").write_text("x")
+    monkeypatch.setattr(dossier_mod, "dossier_dir", lambda *a: day / "01-fuel")
+    with pytest.raises(EngineError):
+        _claim_dir(tmp_path, TODAY, "fuel")

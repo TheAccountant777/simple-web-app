@@ -228,8 +228,12 @@ def _one(
     elif not refs and not reasons:
         reasons.append("no quote and no figure")
     speculation = quote is None and not refs and not hard
-    numbers = numbers_check(cand.text_template, quote, cand.period) if not speculation else []
-    reasons.extend(numbers)
+    numbers = numbers_check(cand.text_template, quote, cand.period)
+    if speculation and numbers:
+        speculation = False
+        reasons.append("number without quote or figure")
+    elif not speculation:
+        reasons.extend(numbers)
     ent = entity_check(cand, refs, ev_text) if not speculation else None
     per = (
         period_check(cand, refs, quote if grounded else None, ev_text) if not speculation else None

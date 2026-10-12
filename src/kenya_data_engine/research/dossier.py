@@ -24,6 +24,7 @@ from kenya_data_engine.data.csvsafe import write_csv
 from kenya_data_engine.data.models import StoredObservation
 from kenya_data_engine.data.registry import CatalogEntry, load_catalog
 from kenya_data_engine.data.store import BlobStore, SeriesStore
+from kenya_data_engine.errors import EngineError
 from kenya_data_engine.research.evidence import EvidenceBook
 from kenya_data_engine.research.memory import TopicMemory
 from kenya_data_engine.research.models import (
@@ -91,20 +92,27 @@ def slugify(text: str) -> str:
 def dossier_dir(briefs_dir: Path, today: date, slug: str) -> Path:
     """`<briefs>/<date>/NN-<slug>` with the next free NN for that date."""
     day = briefs_dir / today.isoformat()
-    taken = [int(m[1]) for p in day.glob("*") if (m := _DATE_DIR.match(p.name)) and p.is_dir()]
+    taken = [int(m[1]) for p in day.glob("*") if (m := _DATE_DIR.match(p.name))]
     return day / f"{max(taken, default=0) + 1:02d}-{slug}"
+
+
+_CLAIM_TRIES = 100
 
 
 def _claim_dir(briefs_dir: Path, today: date, slug: str) -> Path:
     """Create the next free dossier folder; losing a race for NN means taking the next one."""
     (briefs_dir / today.isoformat()).mkdir(parents=True, exist_ok=True)
-    while True:
+    for _ in range(_CLAIM_TRIES):
         root = dossier_dir(briefs_dir, today, slug)
         try:
             root.mkdir(exist_ok=False)
         except FileExistsError:
             continue
         return root
+    raise EngineError(
+        f"could not create a dossier folder under {briefs_dir / today.isoformat()}",
+        hint="check the folder for stray files and its permissions",
+    )
 
 
 # --- reproducibility --------------------------------------------------------------------------

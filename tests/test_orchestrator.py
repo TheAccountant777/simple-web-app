@@ -210,6 +210,42 @@ async def test_budget_exhausted_in_claims_continues(ctx, respx_mock):
     assert out.verdict != "supported"  # the headline could not be a fact
 
 
+async def test_claim_writer_crash_is_a_gap_and_dossier_still_written(ctx, respx_mock):
+    respx_mock.get(WB_URL).respond(json=WB_BODY)
+    m, _ = models()
+    m["claims"] = Counter(RuntimeError("writer boom sk-secret")).model
+    out = await research(TOPIC, ctx, models=m)
+    assert out.claims == [] and any(
+        g.startswith("claim writer failed: writer boom") for g in out.gaps
+    )
+    assert (ctx.run.dir / "research" / "outcome.json").exists()
+
+
+async def test_all_searches_failing_is_a_loud_gap(ctx, respx_mock, monkeypatch):
+    from kenya_data_engine.research.orchestrator import SEARCH_FAILED_GAP, _Research
+
+    respx_mock.get(WB_URL).respond(json=WB_BODY)
+    m, _ = models()
+    orig = _Research.deps
+
+    def deps(self, group):
+        self.search_stats.update(attempts=3, failures=3)
+        return orig(self, group)
+
+    monkeypatch.setattr(_Research, "deps", deps)
+    out = await research(TOPIC, ctx, models=m)
+    assert SEARCH_FAILED_GAP in out.gaps and "engine doctor" in SEARCH_FAILED_GAP
+
+
+async def test_some_searches_ok_is_not_a_gap(ctx, respx_mock):
+    from kenya_data_engine.research.orchestrator import SEARCH_FAILED_GAP
+
+    respx_mock.get(WB_URL).respond(json=WB_BODY)
+    m, _ = models()
+    out = await research(TOPIC, ctx, models=m)
+    assert SEARCH_FAILED_GAP not in out.gaps
+
+
 async def test_scout_exception_recorded_in_gaps(ctx, respx_mock):
     respx_mock.get(WB_URL).respond(json=WB_BODY)
     scout_model = Counter(RuntimeError("boom sk-secret"))
