@@ -38,14 +38,21 @@ _UP = (
     r"rise|rises|rising|rose|risen|climb|climbs|climbed|climbing|grew|grows|growing|"
     r"surge|surges|surged|surging|jump|jumps|jumped|jumping|gain|gains|gained|gaining|"
     r"increase|increases|increased|increasing|higher|soar|soars|soared|soaring|"
-    r"spike|spikes|spiked|spiking"
+    r"spike|spikes|spiked|spiking|grow|raise|raised|raises|raising|hike|hikes|hiked|hiking|"
+    r"expand|expands|expanded|expanding|strengthen|strengthens|strengthened|strengthening|"
+    r"stronger|rally|rallies|rallied|rallying|rebound|rebounds|rebounded|rebounding|"
+    r"doubled|tripled|costlier|dearer|pricier"
 )
 _DOWN = (
     r"fall|falls|falling|fell|fallen|decline|declines|declined|declining|"
     r"drop|drops|dropped|dropping|slid|slide|slides|sliding|plunge|plunges|plunged|plunging|"
     r"cut|cuts|cutting|reduce|reduces|reduced|reducing|cheaper|"
     r"decrease|decreases|decreased|decreasing|lower|dip|dips|dipped|dipping|"
-    r"slump|slumps|slumped|slumping|ease|eases|eased|easing"
+    r"slump|slumps|slumped|slumping|ease|eases|eased|easing|lowered|lowering|lowers|"
+    r"reduction|reductions|cheapest|cheapen|cheapens|cheapened|slash|slashes|slashed|slashing|"
+    r"shrank|shrink|shrinks|shrinking|shrunk|contracted|contraction|"
+    r"weaken|weakens|weakened|weakening|weaker|tumble|tumbles|tumbled|tumbling|"
+    r"sank|sink|sinks|sinking|retreated|plummet|plummets|plummeted|plummeting"
 )
 UP_WORDS = re.compile(rf"\b(?:{_UP})\b", re.I)
 DOWN_WORDS = re.compile(rf"\b(?:{_DOWN})\b", re.I)
@@ -53,9 +60,17 @@ CHANGE_KINDS = ("change", "pct_change", "yoy")
 
 
 def directions(text: str, entities: Iterable[str | None] = ()) -> set[str]:
-    """Direction words found in `text` (entity names removed first): a subset of {"up", "down"}."""
-    for entity in sorted({e for e in entities if e}, key=len, reverse=True):
-        text = re.sub(re.escape(entity), " ", text, flags=re.I)
+    """Direction words found in `text` (entity names removed first): a subset of {"up", "down"}.
+
+    Entities are removed as whole words or phrases, case-insensitively, so "Lower Kabete" goes as
+    one phrase and an entity "Low" leaves "lower" alone. An entity that is itself a direction word
+    (a place called "Lower") is removed only where its exact casing appears, so "lower prices"
+    still reads as down.
+    """
+    for entity in sorted({e.strip() for e in entities if e and e.strip()}, key=len, reverse=True):
+        pattern = rf"(?<!\w){re.escape(entity)}(?!\w)"
+        bare = UP_WORDS.fullmatch(entity) or DOWN_WORDS.fullmatch(entity)
+        text = re.sub(pattern, " ", text, flags=0 if bare else re.I)
     found = set()
     if UP_WORDS.search(text):
         found.add("up")

@@ -696,3 +696,119 @@ def test_direction_entity_names_are_ignored():
 )  # fmt: skip
 def test_direction_words_still_detected(text, want):
     assert directions(text) == {want}
+
+
+# --- fix round 4 ---------------------------------------------------------------------------
+
+_NEW_UP = [
+    "grow",
+    "raise",
+    "raised",
+    "raises",
+    "raising",
+    "hike",
+    "hikes",
+    "hiked",
+    "hiking",
+    "expand",
+    "expands",
+    "expanded",
+    "expanding",
+    "strengthen",
+    "strengthens",
+    "strengthened",
+    "strengthening",
+    "stronger",
+    "rally",
+    "rallies",
+    "rallied",
+    "rallying",
+    "rebound",
+    "rebounds",
+    "rebounded",
+    "rebounding",
+    "doubled",
+    "tripled",
+    "costlier",
+    "dearer",
+    "pricier",
+]
+_NEW_DOWN = [
+    "lowered",
+    "lowering",
+    "lowers",
+    "reduction",
+    "reductions",
+    "cheapest",
+    "cheapen",
+    "cheapens",
+    "cheapened",
+    "slash",
+    "slashes",
+    "slashed",
+    "slashing",
+    "shrank",
+    "shrink",
+    "shrinks",
+    "shrinking",
+    "shrunk",
+    "contracted",
+    "contraction",
+    "weaken",
+    "weakens",
+    "weakened",
+    "weakening",
+    "weaker",
+    "tumble",
+    "tumbles",
+    "tumbled",
+    "tumbling",
+    "sank",
+    "sink",
+    "sinks",
+    "sinking",
+    "retreated",
+    "plummet",
+    "plummets",
+    "plummeted",
+    "plummeting",
+]
+
+
+@pytest.mark.parametrize(
+    ("word", "want"), [(w, "up") for w in _NEW_UP] + [(w, "down") for w in _NEW_DOWN]
+)
+def test_direction_new_word_forms(word, want):
+    assert directions(f"Prices {word} in Nairobi") == {want}
+    assert directions(word.upper()) == {want}
+
+
+@pytest.mark.parametrize("text", ["expansion", "highest", "contract", "growth", "lowest"])
+def test_direction_new_forms_do_not_overmatch(text):
+    assert directions(text) == set()
+
+
+def test_contradicted_lowered_and_hiked_claims_are_refused(ctx, tmp_path):
+    deps = _book(ctx, tmp_path)
+    fb = _figbook(("F2", "18", "KES/L"), ("F3", "-2.10", "KES/L"))
+    pack = FigurePack(refs=[_ref("F2", "change"), _ref("F3", "change")], markdown="",
+                      comparisons_csv="")  # fmt: skip
+
+    def one(template, figs):
+        c = _cand(quote=None, evidence=None, text_template=template, figures=figs)
+        return _static(ctx, deps, [c], pack=pack, fbook=fb)[0]
+
+    for bad in (one("EPRA lowered super in Nairobi, {F2}.", ["F2"]),
+                one("EPRA hiked super in Nairobi, {F3}.", ["F3"])):  # fmt: skip
+        assert bad.status == "refused" and any("direction" in r for r in bad.reasons)
+    assert one("EPRA hiked super in Nairobi, {F2}.", ["F2"]).reasons == []
+    assert one("EPRA lowered super in Nairobi, {F3}.", ["F3"]).reasons == []
+
+
+def test_direction_entity_strip_is_whole_word():
+    assert directions("lower prices", ["Lower"]) == {"down"}
+    assert directions("Prices in Lower Kabete", ["Lower Kabete"]) == set()
+    assert directions("prices in LOWER KABETE", ["Lower Kabete"]) == set()
+    assert directions("lower prices", ["Low"]) == {"down"}
+    assert directions("Prices rose in Lower", ["Lower"]) == {"up"}
+    assert directions("Prices in Nairobi", ["", None, "  "]) == set()
