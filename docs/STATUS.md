@@ -54,7 +54,7 @@ explainer content on **LinkedIn and X**.
 Branch `claude/loving-hawking-eucp75` in `TheAccountant777/simple-web-app`. That repo was
 retrofitted: the old Flask app was deleted.
 
-**State:** about 439 tests, about 97% coverage, `make check` green, everything pushed.
+**State:** about 960 tests, about 96% coverage, `make check` green, everything pushed. Plan 2 (data + research) is built; see §7.
 
 ### Pipeline (`engine run`)
 `Radar (code) → Synthesizer (DeepSeek: cluster → rubric scores; code: weighted rank) → ranked topics`
@@ -154,43 +154,59 @@ retrofitted: the old Flask app was deleted.
   Claude-Session: https://claude.ai/code/session_01BZbyYiQ1AmtoKWqSaEYP8z
   ```
 
-## 7. Next: Plan 2, research and verification (not yet written)
+## 7. Plan 2 (research, data, dossiers): built, awaiting the live laptop test
 
-Write it with superpowers:writing-plans from spec §§4.3–4.6, upgraded by research doc §0 and §7:
+**Docs:**
+- spec: `docs/superpowers/specs/2026-10-09-plan-2-research-dossier-design.md`
+- plans: `docs/superpowers/plans/...plan-2a-data-foundation.md` and `...plan-2b-research-agents.md`
+- research notes: `docs/research/2026-10-09-{kenya-data-catalog,table-extraction,agentic-research-verification}.md`
+- **testing guide for the user: `docs/TESTING-PHASE-2.md`**
 
-1. **Generalise `run_agent` first.** Add `deps` and RunContext access for tools, Pydantic AI
-   `UsageLimits` (about 15 tool calls), a budget check per model request, and per-agent budgets from
-   config. This was the final reviewer's item I4.
-2. **Planner agent** (with tools: search, site search, fetch, PDF, memory). Its output:
-   - `ResearchBrief`, with a reader-question `core_question`;
-   - 2–3 angles, including a contrarian one, plus a **framing challenge** ("what would make this
-     wrong?");
-   - `chart_concepts`, each tagged with its FT relationship type;
-   - a **story verdict**: `supported | reframed | reject`, with reasons.
-3. **Data Scout:** one worker per data requirement, running in parallel.
-   - The worker returns a `DataSourceSpec`; code extracts the data (adapter, CSV, XLSX, HTML table,
-     pdfplumber, then Docling for complex PDFs).
-   - **Bulletproofing:** schema and range checks, spot-check, cross-source, **totals reconciliation**,
-     **coverage gaps**, **vintage and revisions**.
-   - Statistics are computed in pandas, never by the LLM.
-4. **Dossier output** (`briefs/<date>/NN-<slug>/`): `brief.md`, `data/*.csv`, `stats.md`,
-   `sources.json`, `gaps.md`, and `research/`. The `research/` folder holds:
-   - `claims.json`, with a status of fact, inference or speculation for each claim, plus quote,
-     vintage and conflicts;
-   - `comparisons.csv`, with like-for-like history;
-   - `verification.md`, the method log.
-5. **Memory:** topics covered, which makes **novelty computable in code**; source reliability.
-   Optional.
-6. **`engine research "<topic>"`**, plus TUI support for viewing dossiers.
-7. **Acceptance test: the fuel dossier.** The engine must:
-   - find EPRA's previous price schedules on its own;
-   - compute the per-litre change for the same town and fuel;
-   - establish the actual status of the VAT proposal from primary sources (Parliament and the
-     National Treasury), resolving whether it *maintains* 8% or is a new cut;
-   - refuse unsupported claims.
-8. **The data catalog** for the Data Scout comes from the external agent's Part B table (CBK
-   DataTables pages, KNBS CPI and LEI, EPRA PDFs, CMA bulletins, World Bank and IMF APIs). Re-verify
-   it live, because some of that agent's claims were wrong.
+**Built (about 960 tests, about 96% coverage, every batch reviewed, plus a final review and fix wave per plan):**
+- **2a, data foundation:**
+  - budget ledger: reservations, protected groups, reallocation and phases;
+  - `run_agent` with deps, `UsageLimits` and a per-request `LedgerModel`, plus search credits and a monthly quota;
+  - `doctor --agents`;
+  - URL safety policy: SSRF checks, checked redirects, size caps, a post-connect peer check, a separate policy cache namespace, robots.txt, and per-domain politeness;
+  - AIA download URL checks; TLS verification is unchanged.
+  - Kenyan number and period parsing (fiscal year, EPRA cycle);
+  - blob store and vintaged series store;
+  - tiered extraction with cell provenance;
+  - accept-or-quarantine checks;
+  - figures with formula logs;
+  - registry: World Bank, SDMX and listing adapters;
+  - commands: `engine data`, `engine catalog probe`, `engine gc`.
+- **2b, research:**
+  - research models and source tiers;
+  - evidence book (untrusted packets, redaction);
+  - agent tools with a URL allowlist;
+  - Planner;
+  - source and topic memory (novelty is now blended into `engine run` scoring in code);
+  - Scout with spec execution and the gap check;
+  - figures for needs;
+  - claim writer (`{F<n>}` placeholders) and verification. Most checks are code: grounding, numbers, entity and period, tiers, staleness, legal stage, sensitive claims, figure direction and entity checks, conflict families, and an isolated entailment judge.
+  - orchestrator with rounds, deadlines, checkpoints and resume;
+  - dossier writer;
+  - commands: `engine research | dossiers | memory | eval`, and a Research section in `engine report`.
+
+**Next:**
+1. **The user runs `docs/TESTING-PHASE-2.md` on the laptop.** The key risks:
+   - whether DeepSeek can handle tool use and structured output together (`doctor --agents`; the spec has a two-phase fallback);
+   - real Kenyan URLs.
+2. **Plan 2a Task 14:** EPRA, CBK and KNBS parsers from the real samples the user pushes from `engine catalog probe --save-samples tests/fixtures/real`.
+3. **Plan 2c:** a TUI Research view and a Dossiers tab.
+4. **Plan 4:** the editorial agent.
+
+**Open, deferred:** see the "Ruling:" lines and the deferred minors in `.superpowers/sdd/*/progress.md`. They are git-ignored and local to the cloud session, so the main ones are summarised here:
+- resume starts a fresh ledger;
+- the DNS-rebinding peer check is skipped behind a real proxy;
+- a secret-bearing URL can sit in the local cache key;
+- no one-shot `ModelRetry` for failed quotes;
+- merged-cell values are copied into data cells, then quarantined;
+- items are fetched one at a time in `fetch_series`;
+- `per_domain_concurrency` only applies inside `policy_fetch`.
+
+**Rule:** subagents are Sonnet or Haiku only (see CLAUDE.md).
 
 ### Later
 - **Plan 4, editorial agent.** It reads dossiers and has no web access. It produces LinkedIn and X
